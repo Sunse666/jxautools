@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,6 +84,16 @@ def load_cookie():
     return fields.get("uuid", ""), fields.get("cookie", "")
 
 
+def quote_non_ascii(url: str) -> str:
+    """
+    只对非 ASCII 部分做百分号编码。
+
+    urllib 只接受 ASCII 地址，而教务系统的查询串里常含中文（`?xklb=已选课程`），
+    不编码会直接抛 `'ascii' codec can't encode characters`，看起来像"接口不通"，实则是本地编码问题。
+    """
+    return urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%")
+
+
 def decode_body(raw: bytes, content_type: str = "") -> str:
     """
     教务系统页面是 **GBK** 编码（不带 meta charset），按 UTF-8 硬解会把中文全变成乱码，
@@ -129,6 +140,8 @@ def cmd_get(path, method="GET", body=None, referer=None):
     if "{uuid}" in path or "{UUID}" in path:
         path = path.replace("{uuid}", uuid).replace("{UUID}", uuid)
     url = path if path.startswith("http") else HOST + "/" + path.lstrip("/")
+    # 查询串里可能含中文（如 ?xklb=已选课程），urlopen 只吃 ASCII 地址，必须先百分号编码
+    url = quote_non_ascii(url)
 
     if referer is None:
         # 默认不带 Referer 会被这个系统的路由守卫拦下（"您没有权限访问该页面"），

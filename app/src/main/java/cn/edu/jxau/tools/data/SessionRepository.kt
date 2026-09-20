@@ -1,5 +1,6 @@
 package cn.edu.jxau.tools.data
 
+import android.content.Context
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.JxauSession
@@ -28,7 +29,7 @@ import java.util.Locale
  * 这是脚本里最有价值的部分（`_validate_saved_session` / `_refresh_portal_session_from_tgt`
  * / `_keepalive_worker`）的安卓化：**目标是一次登录长期可用**。
  */
-class SessionRepository(private val store: SessionStore) {
+class SessionRepository private constructor(private val store: SessionStore) {
 
     private val _session = MutableStateFlow(store.loadSession())
     val session: StateFlow<JxauSession?> = _session.asStateFlow()
@@ -276,6 +277,23 @@ class SessionRepository(private val store: SessionStore) {
         }
         keepaliveJob = null
         _keepaliveRunning.value = false
+    }
+
+    companion object {
+        @Volatile
+        private var shared: SessionRepository? = null
+
+        /**
+         * 全局唯一的会话中心。
+         *
+         * 必须共享而不是各 ViewModel 各 new 一个：登录页与主界面（课表/我的）都读同一份会话，
+         * 两个实例会让保活心跳跑两份、`_session` 状态分叉——「一个页面说已登录、另一个说没登录」
+         * 这类难查的 bug 就是从这里长出来的。
+         */
+        fun get(context: Context): SessionRepository =
+            shared ?: synchronized(this) {
+                shared ?: SessionRepository(SessionStore(context.applicationContext)).also { shared = it }
+            }
     }
 }
 

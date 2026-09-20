@@ -4,12 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
+import cn.edu.jxau.tools.core.SelfTest
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.SessionStore
 import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.JxauSession
 import cn.edu.jxau.tools.data.net.CasAuth
-import cn.edu.jxau.tools.data.net.CasRsa
 import cn.edu.jxau.tools.data.net.MenuProbe
 import cn.edu.jxau.tools.data.net.SiteProfile
 import cn.edu.jxau.tools.data.net.SiteProfiles
@@ -45,7 +45,9 @@ data class LoginUiState(
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     private val store = SessionStore(application)
-    val repo = SessionRepository(store)
+
+    /** 与主界面共用同一份会话状态，别改成 new SessionRepository(store) */
+    val repo = SessionRepository.get(application)
 
     private val _state = MutableStateFlow(
         LoginUiState(
@@ -59,7 +61,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<LoginUiState> = _state.asStateFlow()
 
     init {
-        runRsaSelfTest()
+        // 自检归 MainActivity 管（SelfTest.runAll 自身幂等，这里再调一次只是兜底）
+        SelfTest.runAll()
         JxauLog.i("应用启动，当前通道设置=${store.channelChoice.shortLabel}，历史通道=${store.lastEffectiveChannel.shortLabel}")
         val existing = repo.session.value
         if (existing != null) {
@@ -82,7 +85,9 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
-                repo.startKeepalive(viewModelScope, profileProvider = { SiteProfiles.of(repo.currentChannel()) })
+                // 保活不在这里启动，归 MainActivity（见 startKeepaliveWhenLoggedIn）统一管。
+                // 原因是实测出来的：会话有效时 App 直接进主界面，登录页的 ViewModel 根本不会创建，
+                // 写在这里的保活就成了永不执行的死代码——而界面上完全看不出来。
             }
         } else {
             _state.update { it.copy(statusText = "未登录") }
@@ -113,15 +118,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearLog() = JxauLog.clear()
 
-    /** RSA 加密自检：4 条固定向量，逐条比对离线基准值 */
+    /**
+     * 手动重跑离线自检（RSA 密码加密 / 周次解析 / 教学周推算 / 课表行归纳）。
+     *
+     * 这几块都是「纯逻辑、边界多、错了不会崩只会算错」的地方，所以给它们固定向量逐条比对，
+     * 而不是靠界面点一点看着对。期望值都是先用 Python 独立算出来再抄进代码的。
+     * 启动时已经跑过一遍（见 [SelfTest]），这个按钮是用来复看的。
+     */
     fun runRsaSelfTest() {
-        JxauLog.i("=== RSA 密码加密自检开始（chunk=${CasRsa.chunkSize}）===")
-        val results = CasRsa.selfTest()
-        results.forEach { line ->
-            if (line.startsWith("PASS")) JxauLog.i(line) else JxauLog.e(line)
-        }
-        val passed = results.count { it.startsWith("PASS") }
-        JxauLog.i("=== RSA 自检结束：$passed/${results.size} 通过 ===")
+        SelfTest.runAll(force = true)
     }
 
     /** 解析本次实际使用的通道（自动模式会做一次可达性探测） */
