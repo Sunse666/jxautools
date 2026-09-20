@@ -145,12 +145,19 @@ class JwglApi(
                 totalScore = row.str("Zpcj").orEmpty(),
                 examScore = row.str("Kscj").orEmpty(),
                 usualScore = row.str("Pscj").orEmpty(),
+                makeupScore = row.str("Bkcj").orEmpty(),
+                retakeScore = row.str("Cxcj").orEmpty(),
+                remark = row.str("Bz").orEmpty(),
                 credit = row.dbl("Zxf") ?: 0.0,
+                // -1 是「服务端没给绩点」，不是 0 分
                 point = row.dbl("Point") ?: -1.0,
                 hours = row.int("Xs") ?: 0,
                 courseCategory = row.str("Kclb").orEmpty(),
                 examCategory = row.str("Kslb").orEmpty(),
-                passed = (row.int("Jgbj") ?: 0) == 1,
+                resultFlag = row.int("Jgbj") ?: -1,
+                examTime = row.str("Kssj").orEmpty(),
+                recorder = row.str("Cbls").orEmpty(),
+                className = row.str("Bjmc").orEmpty(),
             )
         }
     }
@@ -230,8 +237,14 @@ class JwglApi(
      * 上限是防呆——万一服务端 `totalCount` 给了个离谱的值（或者一直返回同一页），
      * 不至于把请求打到死循环。
      *
+     * ⚠️ **`totalCount` 不可信，只信 `<= 0` 之外的值。**
+     * 实测成绩接口在有 27 行数据的情况下返回 `totalCount: 0`。
+     * 如果直接拿它当终止条件（`collected.size >= 0` 恒真），第一批就退出，
+     * 结果会**静默截断成只有第一页**——行数少到看不出来，是最难发现的错。
+     * 所以 `<= 0` 时视为「服务端没给总数」，退回靠「返回行数少于 pageSize」判断结束。
+     *
      * **任何一页失败都返回 null**，不返回「已抓到的部分」：
-     * 半份课表比没有课表更危险，用户不会发现少了几门课。
+     * 半份数据比没有数据更危险，用户不会发现少了几条。
      */
     private suspend fun fetchAllRows(
         tail: String,
@@ -245,7 +258,7 @@ class JwglApi(
         while (page < MAX_PAGES) {
             val form = baseForm + listOf("start" to start.toString(), "limit" to pageSize.toString())
             val body = postJson(tail, form) ?: return null
-            if (total == null) total = body.int("totalCount")
+            if (total == null) total = body.int("totalCount")?.takeIf { it > 0 }
             val rows = body["Data"].asRows()
             if (rows.isEmpty()) break
             collected += rows

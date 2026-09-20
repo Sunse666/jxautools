@@ -8,13 +8,23 @@ package cn.edu.jxau.tools.data.model
  */
 
 /** 学期。`code` 形如 `20261` = 2026学年第一学期 */
-data class Term(val code: String, val label: String) {
-    /** `20261` → `2026-2027 第1学期`；形态不符时原样返回 */
-    fun pretty(): String {
-        if (code.length != 5 || !code.all { it.isDigit() }) return label.ifBlank { code }
-        val year = code.substring(0, 4)
-        val half = code.substring(4)
-        return "$year-${year.toInt() + 1} 第${half}学期"
+data class Term(val code: String, val label: String = "") {
+    /** `20261` → `2026-2027 第1学期`；形态不符时退回 [label] 或原码 */
+    fun pretty(): String = labelOf(code).ifBlank { label.ifBlank { code } }
+
+    companion object {
+        /**
+         * 学期码 → 可读标签。形态不符时返回空串（调用方决定回退成什么）。
+         *
+         * 抽成静态函数是因为成绩数据里只带学期码（`Xq`），
+         * 那批数据拿不到 `/Common/BaseData/GetKsXq` 的 `Value` 字段，只能靠码自己推。
+         */
+        fun labelOf(code: String): String {
+            if (code.length != 5 || !code.all { it.isDigit() }) return ""
+            val year = code.substring(0, 4)
+            val half = code.substring(4)
+            return "$year-${year.toInt() + 1} 第${half}学期"
+        }
     }
 }
 
@@ -127,38 +137,100 @@ data class ExamItem(
  *
  * ⚠️ 实测确认 `Zpcj`（总评）**可能是文字**（如 `良好`），不能直接当数字解析。
  * 需要数值时用 [totalScoreValue]。
+ *
+ * ⚠️ `Point`（绩点）**大部分行是 `-1.0`**：实测 27 条里只有 4 条有真值。
+ * 服务端并不为每门课提供绩点，因此**不能拿它算平均学分绩点**。
  */
 data class GradeItem(
     /** `Kcmc` */
-    val courseName: String,
+    val courseName: String = "",
     /** `Kcdm` */
-    val courseCode: String,
+    val courseCode: String = "",
     /** `Xq` 学期 */
-    val term: String,
+    val term: String = "",
     /** `Zpcj` 总评，原文 */
-    val totalScore: String,
+    val totalScore: String = "",
     /** `Kscj` 考试成绩，原文（可能是 `无`） */
-    val examScore: String,
-    /** `Pscj` 平时成绩，原文 */
-    val usualScore: String,
-    /** `Zxf` 学分 */
-    val credit: Double,
-    /** `Point` 绩点。实测 `-1.0` 表示无绩点 */
-    val point: Double,
+    val examScore: String = "",
+    /** `Pscj` 平时成绩，原文（可能是 `无`） */
+    val usualScore: String = "",
+    /** `Bkcj` 补考成绩，原文（可能是 `无`）。实测有 `69`/`71` 这类真值 */
+    val makeupScore: String = "",
+    /** `Cxcj` 重修成绩，原文 */
+    val retakeScore: String = "",
+    /** `Bz` 备注。实测补考行会给 `未入库`（成绩还没录进系统） */
+    val remark: String = "",
+    /** `Zxf` 学分。补考行恒为 0，不能重复计入已修学分 */
+    val credit: Double = 0.0,
+    /** `Point` 绩点。实测 `-1.0` 是「服务端没给」，不代表 0 分 */
+    val point: Double = -1.0,
     /** `Xs` 学时 */
-    val hours: Int,
-    /** `Kclb` 课程类别 */
-    val courseCategory: String,
-    /** `Kslb` 考试类别 */
-    val examCategory: String,
-    /** `Jgbj` 及格标记 */
-    val passed: Boolean,
+    val hours: Int = 0,
+    /** `Kclb` 课程类别（公共课 / 专业课 / 学科基础课…） */
+    val courseCategory: String = "",
+    /** `Kslb` 考试类别（`课程考试` / `补考`） */
+    val examCategory: String = "",
+    /** `Jgbj` 结果标记，原始值。语义见 [passState] */
+    val resultFlag: Int = -1,
+    /** `Kssj` 考试时间（可能是 `未定`） */
+    val examTime: String = "",
+    /** `Cbls` 成绩录入老师 */
+    val recorder: String = "",
+    /** `Bjmc` 班级名 */
+    val className: String = "",
 ) {
     /** 总评的数值形态；是 `良好` 这类文字时为 null */
     val totalScoreValue: Double? get() = ScoreParser.toNumber(totalScore)
 
-    /** 是否有效绩点（`-1.0` 是「无」） */
+    /** 总评是否为等级制（有值但不是数字，如 `良好`） */
+    val isGradeLevel: Boolean get() = totalScore.isNotBlank() && totalScoreValue == null
+
+    /** 结果三态。见 [PassState] 的说明 */
+    val passState: PassState get() = PassState.of(resultFlag)
+
+    /** 是否有效绩点（`-1.0` 是「服务端没给」） */
     val hasPoint: Boolean get() = point >= 0.0
+
+    /**
+     * 是否计入「已获学分 / 平均分」的统计口径。
+     *
+     * 排除两类的理由：
+     * - 补考行（`resultFlag == 2`）：那是对同一门课的第二次记录，学分字段也是 0，
+     *   计进去只会让课程门数虚高。
+     * - 学分为 0 的行：无法参与学分加权。
+     */
+    val countsTowardStats: Boolean get() = passState != PassState.MAKEUP && credit > 0.0
+}
+
+/**
+ * `Jgbj` 的三态。
+ *
+ * 第一版模型把它当成 `Boolean`（`resultFlag == 1`），丢了两种状态：
+ * 实测 27 条里 `0` 有 3 条（百分制 42/44/56，即**不及格**）、
+ * `2` 有 3 条（学期是 20261、类别是「补考」、备注「未入库」，即**补考记录**）。
+ * 把补考也显示成「及格」是错的，把不及格显示成「及格」更错。
+ */
+enum class PassState(val label: String) {
+    /** `Jgbj == 0` */
+    FAILED("不及格"),
+
+    /** `Jgbj == 1` */
+    PASSED("及格"),
+
+    /** `Jgbj == 2`：补考记录。**不代表补考已通过**，实测有一条补考总评仅 35 分 */
+    MAKEUP("补考"),
+
+    /** 取值不认识。不猜，显式标出来 */
+    UNKNOWN("未知");
+
+    companion object {
+        fun of(flag: Int): PassState = when (flag) {
+            0 -> FAILED
+            1 -> PASSED
+            2 -> MAKEUP
+            else -> UNKNOWN
+        }
+    }
 }
 
 /** 选课开放状态。来自 `User/CheckGuid/?guid={uuid}` */

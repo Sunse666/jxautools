@@ -1,5 +1,6 @@
 package cn.edu.jxau.tools.core
 
+import cn.edu.jxau.tools.data.model.GradeStats
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
@@ -53,6 +54,7 @@ object SelfTest {
         report("周次解析", WeekParser.selfTest())
         report("教学周推算", WeekMath.selfTest())
         report("课表行归纳", TimetableGrid.selfTest())
+        report("成绩统计口径", GradeStats.selfTest())
         JxauLog.i("=== 全部自检：$passed/$total 通过 ===")
         return passed to total
     }
