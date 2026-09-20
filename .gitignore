@@ -1,0 +1,31 @@
+# === 凭据与隐私（绝不能提交）===
+.secrets/
+*.cookie
+cookie*.txt
+local.properties
+*.keystore
+*.jks
+
+# === Android / Gradle 构建产物 ===
+.gradle/
+build/
+app/build/
+*/build/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+output.json
+release/
+
+# === IDE / 工具 ===
+.idea/
+*.iml
+.vscode/
+*.hprof
+
+# === 系统 ===
+.DS_Store
+Thumbs.db
