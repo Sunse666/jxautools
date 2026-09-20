@@ -8,6 +8,7 @@ local.properties
 
 # === Android / Gradle 构建产物 ===
 .gradle/
+.kotlin/
 build/
 app/build/
 */build/
@@ -19,6 +20,10 @@ captures/
 *.class
 output.json
 release/
+
+# === 本地临时产物（截图 / dump / 抓取结果，随手可重现，不入库）===
+tools/out/
+out/
 
 # === IDE / 工具 ===
 .idea/

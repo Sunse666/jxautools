@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 学士帽图形。画布 108dp，安全圆仅 66dp（中心 21..87），因此图形全部收在 22..86 内。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 帽板 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,36 L86,48 L54,60 L22,48 Z" />
+    <!-- 帽体 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,54 L38,66 C38,68 46,74 54,74 C62,74 70,68 70,66 L70,54 L54,60 Z" />
+    <!-- 流苏 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M82,50 L82,68 L86,68 L86,50 Z" />
+</vector>
