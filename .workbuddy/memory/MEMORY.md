@@ -15,27 +15,50 @@
 - **可能分发给同学** → 需兼容性适配、风险提示与免责声明。
 - minSdk 26 / targetSdk 35。
 
-## 教务系统技术事实（来自脚本逆向）
+## 教务系统技术事实（已实测，逐条见 `docs/教务系统接口清单.md`）
 - 认证：CAS 双跳 —— 密码 RSA 公钥块加密（1024 位，指数 0x10001）+ kaptcha → **TGT**（长期）→ TGT 换 **ST** → ST 兑换 Session Cookie + **UUID**（所有接口路径都带它）。
+  **必须走 TGT→ST**：登录响应里那个 ST 是按 `service=portal.jxau.edu.cn/shiro-cas` 签发的，拿去换教务会话只会拿到 ASP.NET_SessionId、**不会跳转 `/Main/Index/{uuid}`**。
 - 保活：每 240s GET `/Main/Index/{uuid}`；本地存 TGT，失效时静默换 ST 重登。
-- 接口风格：ASP.NET POST，返回 `{Result/success, Message, Data, totalCount}`。
-- 已确认 6 个端点：
-  - `KcManage/GxKcManage/GetKcInfo/{uuid}` 开课查询（start/limit 分页，可过滤 xklb/Jxb/Kkdw）
-  - `KcManage/GxKcManage/XkInfo/{uuid}` 选课提交（JxbBh + Xklb + pcid）
-  - `User/CheckGuid/` 选课开放预检（guid=uuid）
-  - `SystemManage/CJManage/GetXsCjByXh/{uuid}` 成绩
-  - `Jxjh/JxjhManage/GetPersonalJxjh/{uuid}` 教学计划
-  - `Main/Index/{uuid}` 会话校验/保活
-- ⚠️ **没有「已选课程/课表」接口** —— 课表页数据源是硬缺口，待用户提供菜单位置。
+- 接口风格：ASP.NET POST。**数据接口必须 POST + 必须带 `start`/`limit`**，失败时返回
+  **HTTP 200 + 1443 字节 HTML 错误页** → 判据是「正文能否解析成 JSON」，不是状态码。
+- 已确认 14 个端点，关键几个：
+  - 课表 `PaikeManage/KebiaoInfo/GetStudentKebiaoByXq/{uuid}`（body `xq`，**不返回 totalCount**）
+  - **已选课程 = `KcManage/GxKcManage/GetKcInfo/{uuid}` + `xklb=已选课程`**（不是独立接口）
+  - 考试安排 `PaiKaoManage/KaoShiAnPaiChaXunManage/GetKaoShiInfo_Student/{uuid}`（body `Xq`）
+  - 学期列表 `Common/BaseData/GetKsXq/{uuid}`（降序，**第一个即当前学期**）
+  - 成绩 `SystemManage/CJManage/GetXsCjByXh/{uuid}`；退选 `KcManage/GxKcManage/DelXkinfo/{uuid}`
+  - `User/CheckGuid` 返回 `Result:false` = 选课窗口未开放
+- 课表字段陷阱：**`Sjd` 不是节次序号**，是 `(星期-1)×10 + 节次块序号` 的拼接
+  （`11`/`21`/`31`/`41` 全是「上午 1-2节」）。排课表的行必须从 `Jieci` 解析节次区间。
+  `Jieci` 有 7 种，含 `下午 5-7节`（三节连排）与 `白天 1-8节`（全天）。
+- **周次/开学日期**：服务端不提供。用考试安排的 `Kszhou`（周次）+ `Ksday`（该周内日期）反推
+  第一周周一，取多数票并暴露可信度；推不出来**不猜**，退回第 1 周让用户手选。
+  `Ksday` 是 `2026-9-11` **不补零**形态，ISO 解析器吃不下。
+- 大小写不能想当然：页面 `KcManage/GxkcManage/XKStudentList`（小写 kc）vs API `KcManage/GxKcManage/GetKcInfo`；
+  考试 `PaiKaoManage` vs 课表 `PaikeManage`。页面是 **GBK 且无 meta charset**。
 
 ## 本机工具链（实测）
-- JDK17 `D:\IO\jdk17`；Android SDK `D:\IO\sdk`（android-35、build-tools 35.0.0）；Gradle 8.10.2 `D:\IO\gradle`。
-- 依赖缓存已有：AGP 8.7.3、Kotlin 2.0.21、Compose、Room 2.6.1、okhttp 4.12.0、retrofit 2.11.0、navigation-compose 2.8.5。
-- **缺 WorkManager / DataStore**；Maven Central 与 Google 源不通，阿里云/华为云镜像可用 → 决定不用这两库（AlarmManager + 前台 Service + SharedPreferences）。
+- JDK17 `D:\IO\jdk17`；Android SDK `D:\IO\sdk`；Gradle 8.10.2 `D:\IO\gradle`。adb 全路径 `D:\IO\sdk\platform-tools\adb.exe`（**不在 PATH 上**）。
+- 依赖缓存已有：AGP 8.7.3、Kotlin 2.0.21、Compose（bom 2024.12.01）、okhttp 4.12.0、jsoup 1.18.3、
+  navigation-compose 2.8.5、lifecycle-runtime-compose。**缺 WorkManager / DataStore** → 不用这两库
+  （AlarmManager + 前台 Service + SharedPreferences）。
+- 离线陷阱：**不能启用 `kotlin("plugin.serialization")`**（compiler plugin 未缓存），
+  只能用运行时 `Json.parseToJsonElement`；`okhttp-urlconnection` 未缓存 → CookieJar 自建。
+- MuMu 模拟器：`adb connect 127.0.0.1:7555`，屏幕 900x1600 / density 320（450x800dp）。
+  **每次 Bash 调用 adb daemon 都会重启 → `connect` 与命令必须放在同一次调用里**，并带 `-s 127.0.0.1:7555`。
+- 调试包可 `adb shell run-as cn.edu.jxau.tools cat /data/data/cn.edu.jxau.tools/shared_prefs/jxau_session.xml`
+  直接取会话 → 这是把接口探测从「端上重编」搬到「本机 Python」的关键（`tools/probe_pages.py`）。
 - 构建全程命令行 Gradle，**不用 Android Studio**。
+- 日志 tag `JXAU_NET`：`adb logcat -d -s JXAU_NET`。
 
 ## 工作约定
 - 每轮实质改动落一次本地 git 提交，提交信息中文，写清「改了什么 + 为什么 + 怎么验证的」。
 - 零警告零错误是底线。
 - 交付要给「改了什么、凭什么说它对了」，不要空泛说明。
-- 不确定的事显式标注，不含糊。
+- 不确定的事显式标注，不含糊。发现旧文档/旧注释与现状不符，**顺手改掉**。
+- **接口层返回值必须区分「失败」与「没数据」**：`null` = 失败，`emptyList` = 成功但为空。
+  两者混同会产生「显示没课、实际是会话失效」这类静默失效。
+- **App 级副作用不要挂在某个页面的 ViewModel 上**：会话有效时登录页根本不会被创建，
+  挂在那儿等于永不执行（保活踩过这个坑，已移到 MainActivity）。
+- **不要自己测自己**：关键纯逻辑用 Python 独立重算一遍期望值再逐项对账，才能真抓错。
+
