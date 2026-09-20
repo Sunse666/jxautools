@@ -117,6 +117,7 @@ fun LoginScreen(viewModel: LoginViewModel = viewModel()) {
                 onToggleKeepalive = viewModel::toggleKeepalive,
                 onClear = viewModel::clearSession,
                 onRsaSelfTest = viewModel::runRsaSelfTest,
+                onDumpMenu = viewModel::dumpMenu,
                 busy = state.busy,
             )
         }
@@ -310,6 +311,7 @@ private fun SessionCard(
     onToggleKeepalive: () -> Unit,
     onClear: () -> Unit,
     onRsaSelfTest: () -> Unit,
+    onDumpMenu: () -> Unit,
 ) {
     SectionCard(title = "会话状态") {
         if (session == null) {
@@ -323,11 +325,13 @@ private fun SessionCard(
                 )
             }
         } else {
-            InfoRow("通道", session.channel.shortLabel)
-            InfoRow("UUID", session.uuid)
-            InfoRow("Cookie", "${session.cookie.length} 字符")
-            InfoRow("TGT", if (session.tgt.isBlank()) "无（无法静默续期）" else session.tgt.take(16) + "…")
-            InfoRow("账号", session.account.ifBlank { "-" })
+            // 只留两行：登录后卡片长高会把按钮挤出屏幕，而按钮恰恰是那时最需要点的。
+            // Cookie 长度等细节在下方运行日志里都有，不必占用界面高度。
+            InfoPair("通道", session.channel.shortLabel, "账号", session.account.ifBlank { "-" })
+            InfoPair(
+                "UUID", session.uuid,
+                "TGT", if (session.tgt.isBlank()) "无" else "有",
+            )
         }
         Spacer(Modifier.height(8.dp))
         HorizontalDivider()
@@ -336,16 +340,18 @@ private fun SessionCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // 抓菜单 = 定位课表/退选等脚本没覆盖的接口，登录后点一次即可
+            OutlinedButton(onClick = onDumpMenu, enabled = !busy && session != null) { Text("抓菜单") }
             OutlinedButton(onClick = onValidate, enabled = !busy && session != null) { Text("校验") }
             OutlinedButton(onClick = onRenew, enabled = !busy && hasTgt) { Text("TGT 续期") }
-            OutlinedButton(onClick = onToggleKeepalive, enabled = session != null) {
-                Text(if (keepalive) "停保活" else "启保活")
-            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            TextButton(onClick = onToggleKeepalive, enabled = session != null) {
+                Text(if (keepalive) "停保活" else "启保活")
+            }
             TextButton(onClick = onRsaSelfTest) { Text("RSA 自检") }
             TextButton(onClick = onClear, enabled = session != null) { Text("清除会话") }
         }
@@ -423,8 +429,8 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun InfoRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+private fun InfoRow(label: String, value: String, modifier: Modifier = Modifier) {
+    Row(modifier = modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
@@ -438,6 +444,16 @@ private fun InfoRow(label: String, value: String) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** 一行放两组「标签 值」。用来把会话卡片的垂直占用压下来——否则详情行一多，
+ *  底部的操作按钮就被挤出屏幕，恰好是登录后最需要点它们的时候。 */
+@Composable
+private fun InfoPair(l1: String, v1: String, l2: String, v2: String) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        InfoRow(l1, v1, Modifier.weight(1f))
+        InfoRow(l2, v2, Modifier.weight(1f))
     }
 }
 

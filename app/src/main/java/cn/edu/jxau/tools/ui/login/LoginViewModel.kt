@@ -10,6 +10,7 @@ import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.JxauSession
 import cn.edu.jxau.tools.data.net.CasAuth
 import cn.edu.jxau.tools.data.net.CasRsa
+import cn.edu.jxau.tools.data.net.MenuProbe
 import cn.edu.jxau.tools.data.net.SiteProfile
 import cn.edu.jxau.tools.data.net.SiteProfiles
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 data class LoginUiState(
     val channelChoice: Channel = Channel.AUTO,
@@ -288,6 +290,59 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * 抓教务系统主页面菜单 + 探测候选接口路径。
+     *
+     * 目的：脚本里没有课表、没有退选，这些接口名无从猜起。菜单是整个路由表最可靠的来源，
+     * 抓下来存成本地 HTML 再离线分析。全部是只读 GET，不动任何数据。
+     */
+    fun dumpMenu() {
+        val session = repo.session.value ?: run {
+            JxauLog.w("当前无会话，无法抓取菜单")
+            _state.update { it.copy(statusText = "请先登录，再抓菜单") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(busy = true, busyLabel = "正在抓取菜单…") }
+            try {
+                val profile = SiteProfiles.of(session.channel)
+                val baseDir = getApplication<Application>().getExternalFilesDir(null)
+                    ?: getApplication<Application>().filesDir
+                val dir = File(baseDir, "menu")
+                val probe = MenuProbe(profile)
+
+                JxauLog.i("=== 开始抓取教务系统菜单（uuid=${session.uuid}）===")
+                val dump = probe.dumpMainPage(session.uuid, dir)
+
+                val allEntries = dump.frames.flatMap { it.entries }
+                JxauLog.i("菜单项合计 ${allEntries.size} 条，逐条列出：")
+                allEntries.distinctBy { it.text + it.href }.take(MAX_MENU_LOG).forEach {
+                    JxauLog.i("  [${it.text.take(24)}] → ${it.href.take(110)}")
+                }
+                if (allEntries.size > MAX_MENU_LOG) {
+                    JxauLog.i("  …（其余 ${allEntries.size - MAX_MENU_LOG} 条见落盘的 HTML）")
+                }
+
+                JxauLog.i("页面里挖出的路径候选 ${dump.pathCandidates.size} 条：")
+                dump.pathCandidates.forEach { JxauLog.i("  · $it") }
+
+                JxauLog.i("=== 菜单抓取完成，原始 HTML 目录：${dump.savedDir} ===")
+                JxauLog.i("（可用 adb pull 取回本机离线分析：$REMOTE_MENU_DIR）")
+
+                JxauLog.i("--- 顺带探测候选接口路径（纯猜测，仅取判定）---")
+                probe.probeCandidates(session.uuid)
+                JxauLog.i("--- 候选探测结束 ---")
+
+                _state.update { it.copy(statusText = "菜单已抓取：${allEntries.size} 项，${dump.pathCandidates.size} 条路径候选") }
+            } catch (e: Exception) {
+                JxauLog.e("抓取菜单异常", e)
+                _state.update { it.copy(statusText = "抓菜单失败：${e.message}") }
+            } finally {
+                _state.update { it.copy(busy = false, busyLabel = "") }
+            }
+        }
+    }
+
     fun clearSession() {
         repo.clear()
         _state.update { it.copy(statusText = "未登录", captchaBase64 = "", captchaUid = "", captchaCode = "", captchaHint = "尚未获取验证码") }
@@ -296,5 +351,14 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         repo.stopKeepalive()
         super.onCleared()
+    }
+
+    companion object {
+        /** 菜单项最多在日志里列这么多条，其余靠落盘 HTML */
+        private const val MAX_MENU_LOG = 80
+
+        /** 落盘位置（应用外部私有目录，无需存储权限即可 adb pull） */
+        private const val REMOTE_MENU_DIR =
+            "/sdcard/Android/data/cn.edu.jxau.tools/files/menu/"
     }
 }

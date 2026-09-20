@@ -64,6 +64,11 @@ ST  ──GET /User/CheckTicketFromSSo?ticket={ST}──▶ 教务系统 (jwgl.j
 
 ### 3. 教务系统接口清单（已逆向确认）
 
+> ⚠️ **本节已被 `docs/教务系统接口清单.md` 取代（2026-09-20 实测版）**。
+> 那份文档用「抓主页面菜单 → 顺 JS 挖接口 → 逐条实测」的方式把端点补到 **14 个**，
+> 并记录了三条必踩的坑（Referer 路由守卫、大小写陷阱、页面 GBK 编码）。
+> 下面这张表保留作脚本视角的原始记录。
+
 教务系统是 **ASP.NET 架构**，所有接口为 POST + form/JSON，返回 `{Result/success, Message, Data, totalCount}`，路径全部携带 UUID：
 
 | 功能 | 接口（jwgl.jxau.edu.cn） | 方法/参数 | 关键返回字段 |
@@ -115,12 +120,20 @@ ST  ──GET /User/CheckTicketFromSSo?ticket={ST}──▶ 教务系统 (jwgl.j
 - **无退避与限流**：无指数退避、无全局 QPS 控制；
 - CheckGuid 预检是"整轮一次"，粒度粗。
 
-**功能缺口**
-- 无课表展示（脚本只能查教学计划和选课数据，没有周课表视图）；
+**功能缺口**（截至脚本本身；2026-09-20 已在服务端侧补齐接口，见 `docs/教务系统接口清单.md`）
+- 无课表展示 —— 脚本缺接口，但**服务端有**（`PaikeManage/KebiaoInfo/GetStudentKebiaoByXq`，已实测）
+- 无「已选课程」查询 —— 脚本没做，但**不用另找接口**：`GetKcInfo` 加 `xklb=已选课程` 即是（已实测）
+- 无考试安排 —— 脚本缺接口，服务端有（`GetKaoShiInfo_Student`，已实测）
 - 无成绩分析（GPA 计算、排名）；
 - 无通知/推送（抢课结果、开放提醒只能盯着屏幕）；
-- 无退选功能；
+- 无退选功能（退选接口 `DelXkinfo` 已找到，属写操作未实测）；
 - 桌面形态决定其无法做到"开抢瞬间必然在线"。
+
+**一个被实证的真 bug：会话校验会误判失效**
+`_validate_saved_session`（CourseQuery.py:497）用 `invalid_markers` 做正文关键字判定，其中含 `"用户登录"`。
+实测教务系统主页面里有一个**被注释掉的** `function changeUsername()`，函数体带 `addTab('修改用户登录信息', …)`，
+于是刚登录成功就会被判「登录态已失效」，接着白白触发一次 TGT 续期。
+安卓侧已移除该标记，改用**正向证据**（正文含本次 uuid）判定 —— 详见 `SessionRepository.validate`。
 
 ---
 

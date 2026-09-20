@@ -5,6 +5,7 @@ import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.JxauSession
 import cn.edu.jxau.tools.data.net.CasAuth
 import cn.edu.jxau.tools.data.net.Http
+import cn.edu.jxau.tools.data.net.SessionCookieHolder
 import cn.edu.jxau.tools.data.net.SiteProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +48,11 @@ class SessionRepository(private val store: SessionStore) {
 
     private var keepaliveJob: Job? = null
 
+    init {
+        // 冷启动时把本地会话的 Cookie 同步给探测类工具（重启后 jar 是空的）
+        _session.value?.cookie?.let { SessionCookieHolder.update(it) }
+    }
+
     /** 校验线程/协程共用的时间戳格式（SimpleDateFormat 非线程安全，这里加锁使用） */
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.CHINA)
 
@@ -77,6 +83,8 @@ class SessionRepository(private val store: SessionStore) {
         if (result.tgt.isNotBlank()) store.pendingTgt = ""
         _session.value = result
         _hasTgt.value = result.tgt.isNotBlank() || store.pendingTgt.isNotBlank()
+        // 同步给探测类工具（MenuProbe 只拿得到 profile，拿不到 Repository）
+        SessionCookieHolder.update(result.cookie)
         JxauLog.i("会话已更新：${result.summary()}")
     }
 
@@ -85,6 +93,7 @@ class SessionRepository(private val store: SessionStore) {
         store.clearSession()
         store.pendingTgt = ""
         Http.resetCookies()
+        SessionCookieHolder.clear()
         _session.value = null
         _hasTgt.value = false
         _lastCheckText.value = "未登录"
@@ -127,14 +136,33 @@ class SessionRepository(private val store: SessionStore) {
                         } else {
                             lowerLocation.contains("login") || lowerLocation.contains("cas")
                         }
-                    val invalidMarkers = listOf("登录信息丢失", "统一身份认证平台", "用户登录", "cas/login")
+
+                    /**
+                     * ⚠️ 这里**故意不含** "用户登录"。
+                     *
+                     * 实测（2026-09-20，抓真页面逐字节核对）：教务系统主页面里有一个**被注释掉的**
+                     * `function changeUsername()`，函数体带字样 `addTab('修改用户登录信息', …)`，
+                     * 于是 "用户登录" 被命中，导致「刚登录成功就被判会话失效」的假阴性。
+                     *
+                     * Python 脚本的 invalid_markers 里含这一条，同样会误判——这是脚本的一个真实缺陷，
+                     * 安卓侧不再沿用。失效判定改由「302 跳登录页」和正向证据共同承担。
+                     */
+                    val invalidMarkers = listOf("登录信息丢失", "统一身份认证平台", "cas/login")
                     val hitMarker = invalidMarkers.firstOrNull { body.contains(it) }
+                    // 正向证据：页面正文里带着本次会话的 uuid（主页面的菜单 URL 全用它拼路径）。
+                    // 比"没命中失效词"强得多——它是"确实拿到了主页面"的正面证明。
+                    val uuidInBody = uuid.isNotBlank() && body.contains(uuid)
 
                     when {
                         redirectedToLogin -> ValidateOutcome(
                             valid = false,
                             cookie = rotatedCookie,
                             detail = "HTTP ${response.code} → ${location.take(80)}",
+                        )
+                        uuidInBody -> ValidateOutcome(
+                            valid = true,
+                            cookie = rotatedCookie,
+                            detail = "HTTP ${response.code}，正文含本次 uuid（${body.length} 字符）",
                         )
                         hitMarker != null -> ValidateOutcome(
                             valid = false,
@@ -144,7 +172,7 @@ class SessionRepository(private val store: SessionStore) {
                         else -> ValidateOutcome(
                             valid = true,
                             cookie = rotatedCookie,
-                            detail = "HTTP ${response.code}，正文 ${body.length} 字符",
+                            detail = "HTTP ${response.code}，正文 ${body.length} 字符（未含 uuid，形态未识别）",
                         )
                     }
                 }

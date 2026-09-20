@@ -60,6 +60,8 @@ dependencies {
 
     // 网络：okhttp 4.12.0（okhttp-urlconnection 未缓存，CookieJar 自行实现）
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // HTML 解析：用于从教务系统主页面里提取左侧菜单（课表等接口路径的唯一可靠来源）
+    implementation("org.jsoup:jsoup:1.18.3")
     // JSON：只走运行时 JsonElement API。注意 kotlin-serialization-compiler-plugin-embeddable
     // 不在缓存里，因此**不能**启用 kotlin("plugin.serialization") 插件。
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
