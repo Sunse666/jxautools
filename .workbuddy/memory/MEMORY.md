@@ -51,6 +51,16 @@
   `from<=curTo` 并入）标「N 门」详情全列；配色 = `floorMod(课程名.hashCode, 10)` → 10 色板
   （别用 `%`，负哈希越界）。行连续不分午晚休。
   缺星期/缺节次的课**排不进表**，DataWarnings 分计数显式提示。对账脚本 `tools/verify_lesson_grid.py`。
+- **行高模型（踩过坑，别写回去）**：底纹格与节次轴 = 每行 `periodHeightDp` +
+  `Arrangement.spacedBy(PERIOD_GAP)` 的**真空隙**；**不是**「行高 = pitchDp（行尾空隙算进行内）」。
+  两种写法总高 / 轴总高 / 块底边落点全都相同（所以只看外框的断言抓不出问题），
+  但可见矩形差一个 PERIOD_GAP → 后者让每个课块底边下漏 3dp 底纹（用户报「色块矮了、底下漏背景」）。
+  内缩量 `TimetableSizeSpec.CELL_INSET_DP`（底纹格与课块共用）；不变量
+  `TimetableSize.fitsCells(from, span)`（5 档 × 330 例穷举）。真机对账 `tools/measure_block_fit.py`。
+  **渲染侧「对齐」有外框与可见矩形两种口径**：只断言外框（如「块底 == rowBottomDp」）
+  会放行整类缺陷；凡涉及相邻元素贴边，必须比内缩之后的矩形。
+- 偏好键分两个文件：`jxau_settings.xml`（theme_mode / color_theme / timetable_*）、
+  `jxau_session.xml`（会话 + saved_at）。测试改过设置记得恢复原值。
 - 课表滚动布局（2026-09-21 二改后，两条都是踩出来的）：
   1. **节次轴必须跟内容一起纵向滚**。轴「固定不滚」时滚到下半段，第 7 节的行下面对着轴上的
      「5」——数字与内容错位，比看不见节次号更糟。做法：轴与网格放进**同一个纵向滚动容器**。
