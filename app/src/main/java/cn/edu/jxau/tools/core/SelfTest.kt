@@ -5,9 +5,11 @@ import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.GradeStats
 import cn.edu.jxau.tools.data.model.RushPolicy
 import cn.edu.jxau.tools.data.model.TimetableGrid
+import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
 import cn.edu.jxau.tools.data.net.CasRsa
+import cn.edu.jxau.tools.ui.timetable.CoursePalette
 
 /**
  * 纯函数自检的汇总入口。
@@ -61,6 +63,8 @@ object SelfTest {
         report("选课容量与汇总口径", CourseClass.selfTest())
         report("会话失效判定", SessionValidation.selfTest())
         report("抢课回执决策", RushPolicy.selfTest())
+        report("外观与课表尺寸偏好", TimetableSizeSpec.selfTest())
+        report("课程块配色", CoursePalette.selfTest())
         JxauLog.i("=== 全部自检：$passed/$total 通过 ===")
         return passed to total
     }

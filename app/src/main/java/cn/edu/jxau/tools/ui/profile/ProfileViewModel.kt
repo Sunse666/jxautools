@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
+import cn.edu.jxau.tools.data.SettingsRepository
+import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.net.SiteProfiles
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -14,6 +16,15 @@ import java.util.Locale
 class ProfileViewModel(application: Application) : AndroidViewModel(application) {
 
     val repo = SessionRepository.get(application)
+
+    /**
+     * 界面偏好（主题、课表尺寸）。
+     *
+     * 和 [repo] 一样取全局单例：主题是在 Activity 顶层消费的，
+     * 这里若自己 new 一个实例去写，写进去的 StateFlow 不是被订阅的那一份，
+     * 表现就是「点了深色没反应、重启才生效」。
+     */
+    val settings = SettingsRepository.get(application)
 
     private val stampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
 
@@ -77,4 +88,15 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     fun exitMock() {
         viewModelScope.launch { repo.exitMockMode() }
     }
+
+    // ---------- 界面偏好 ----------
+
+    /** 切换主题。写的是单例里的 StateFlow，Activity 顶层订阅着它 → 立即换配色并落盘 */
+    fun setThemeMode(mode: ThemeMode) = settings.setThemeMode(mode)
+
+    fun setPeriodHeightDp(dp: Int) = settings.setPeriodHeightDp(dp)
+
+    fun setColumnWidthDp(dp: Int) = settings.setColumnWidthDp(dp)
+
+    fun resetTimetableSize() = settings.resetTimetableSize()
 }

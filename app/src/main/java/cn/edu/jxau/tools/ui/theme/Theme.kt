@@ -21,6 +21,20 @@ private val BrandBlue = Color(0xFF1565C0)
 private val BrandBlueDark = Color(0xFF9FC7FF)
 private val BrandTeal = Color(0xFF00695C)
 
+/**
+ * 两套配色的「窗口底色」。
+ *
+ * 单独暴露出来是为了 [cn.edu.jxau.tools.MainActivity] 能在 Compose 首帧之前
+ * 把 Activity 的窗口背景调成同一个颜色 —— 否则深色主题下冷启动会先闪一下白底。
+ * 这里的值必须与下面两份 scheme 的 `background` 一致，改一处要改两处（自检里对账）。
+ */
+object JxauPalette {
+    val LightBackground = Color(0xFFF8F9FC)
+    val DarkBackground = Color(0xFF111318)
+
+    fun backgroundFor(dark: Boolean): Color = if (dark) DarkBackground else LightBackground
+}
+
 private val LightColors = lightColorScheme(
     primary = BrandBlue,
     onPrimary = Color.White,
@@ -32,7 +46,7 @@ private val LightColors = lightColorScheme(
     onSecondaryContainer = Color(0xFF00201C),
     error = Color(0xFFBA1A1A),
     onError = Color.White,
-    background = Color(0xFFF8F9FC),
+    background = JxauPalette.LightBackground,
     onBackground = Color(0xFF1A1C1E),
     surface = Color(0xFFFFFFFF),
     onSurface = Color(0xFF1A1C1E),
@@ -54,7 +68,7 @@ private val DarkColors = darkColorScheme(
     onError = Color(0xFF690005),
     // 下面这些角色必须显式给出，否则会落到 Material 默认值，
     // 出现"暗色背景配亮色卡片"这种不协调的观感
-    background = Color(0xFF111318),
+    background = JxauPalette.DarkBackground,
     onBackground = Color(0xFFE2E2E6),
     surface = Color(0xFF1A1C20),
     onSurface = Color(0xFFE2E2E6),
