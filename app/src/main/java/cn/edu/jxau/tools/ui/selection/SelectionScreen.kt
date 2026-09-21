@@ -28,12 +28,17 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -43,11 +48,93 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.data.model.CourseClass
+import cn.edu.jxau.tools.data.model.RushState
 import cn.edu.jxau.tools.data.model.SelectionScope
 import cn.edu.jxau.tools.data.model.SelectionStats
+import cn.edu.jxau.tools.ui.rush.RushScreen
 
+/**
+ * 选课页 = **课程浏览** + **抢课任务**两半。
+ *
+ * ## 为什么这两半放在一页里（2026-09-21 合并）
+ * 它们本来就是一件事：课程行上的「抢」按钮产出抢课任务，而抢课任务全部来自课程列表。
+ * 拆成两个底部 Tab 时，用户加完任务要自己切到另一个 Tab 去找它，而那一页又看不到课程在哪 ——
+ * 一整屏里没有任何一处能同时回答「我在抢什么」。
+ *
+ * 「抢课任务」那一半就是原来的 `RushScreen`，**行为一行没改**，
+ * 只是从底部 Tab 降级成了内层视图（它订阅的 `RushStore` 是单例，位置变了订阅不变）。
+ */
 @Composable
 fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
+    // 存名称而不是序号：以后插入新的内层视图不会把用户当下所在的那一半读成另一半
+    var tabName by rememberSaveable { mutableStateOf(SelectionTab.COURSES.name) }
+    val tab = SelectionTab.of(tabName)
+    val tasks by viewModel.rushTasks.collectAsState()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        SelectionTabRow(
+            current = tab,
+            pendingCount = tasks.count { it.state == RushState.WAITING },
+            onPick = { tabName = it.name },
+        )
+        when (tab) {
+            SelectionTab.COURSES -> SelectionCourses(
+                viewModel = viewModel,
+                onGoRush = { tabName = SelectionTab.RUSH.name },
+            )
+
+            SelectionTab.RUSH -> RushScreen(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+/** 内层两半。新增视图 = 在这里加一行 */
+private enum class SelectionTab(val label: String) {
+    COURSES("课程"),
+    RUSH("抢课任务"),
+    ;
+
+    companion object {
+        /** 认不出来就回「课程」—— 这一半永远存在，不像「我的」页那样可以停在首页 */
+        fun of(name: String?): SelectionTab = entries.firstOrNull { it.name == name } ?: COURSES
+    }
+}
+
+/**
+ * 内层切换。
+ *
+ * 排队数直接写在标签上（`抢课任务（3）`）：用户加完任务最想知道的就是「有几个在等着」，
+ * 把它放在他一定会看到的地方，比弹一次提示更持久。
+ */
+@Composable
+private fun SelectionTabRow(
+    current: SelectionTab,
+    pendingCount: Int,
+    onPick: (SelectionTab) -> Unit,
+) {
+    TabRow(selectedTabIndex = current.ordinal) {
+        SelectionTab.entries.forEach { tab ->
+            Tab(
+                selected = tab == current,
+                onClick = { onPick(tab) },
+                text = {
+                    Text(
+                        if (tab == SelectionTab.RUSH && pendingCount > 0) {
+                            "${tab.label}（${pendingCount}）"
+                        } else {
+                            tab.label
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                },
+            )
+        }
+    }
+}
+
+/** 课程浏览这一半 */
+@Composable
+private fun SelectionCourses(viewModel: SelectionViewModel, onGoRush: () -> Unit) {
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(Unit) { viewModel.load() }
@@ -71,7 +158,7 @@ fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
             Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
         }
 
-        SelectionUiState.Phase.Ready -> SelectionBody(state, viewModel)
+        SelectionUiState.Phase.Ready -> SelectionBody(state, viewModel, onGoRush)
     }
 
     state.confirm?.let { course ->
@@ -88,7 +175,7 @@ fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
 // ---------- 主体 ----------
 
 @Composable
-private fun SelectionBody(state: SelectionUiState, viewModel: SelectionViewModel) {
+private fun SelectionBody(state: SelectionUiState, viewModel: SelectionViewModel, onGoRush: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
 
         ScopeBar(
@@ -105,7 +192,11 @@ private fun SelectionBody(state: SelectionUiState, viewModel: SelectionViewModel
         )
 
         state.notice?.let { notice ->
-            NoticeBar(notice = notice, onDismiss = viewModel::dismissNotice)
+            NoticeBar(
+                notice = notice,
+                onDismiss = viewModel::dismissNotice,
+                onGoRush = if (notice.offerRushJump) onGoRush else null,
+            )
         }
 
         SearchRow(
@@ -241,8 +332,14 @@ private fun WindowBanner(signal: WindowSignal, note: String, ticketValid: Boolea
     }
 }
 
+/**
+ * 提示条。
+ *
+ * [onGoRush] 非空时多一个「去抢课」按钮 —— 抢课任务与课程列表现在同属一页的上下两半，
+ * 但用户此刻停在「课程」这一半，得给他一步就能过去的入口。
+ */
 @Composable
-private fun NoticeBar(notice: WriteNotice, onDismiss: () -> Unit) {
+private fun NoticeBar(notice: WriteNotice, onDismiss: () -> Unit, onGoRush: (() -> Unit)?) {
     val bg = if (notice.warning) MaterialTheme.colorScheme.errorContainer
     else MaterialTheme.colorScheme.secondaryContainer
     val fg = if (notice.warning) MaterialTheme.colorScheme.onErrorContainer
@@ -261,6 +358,9 @@ private fun NoticeBar(notice: WriteNotice, onDismiss: () -> Unit) {
             color = fg,
             modifier = Modifier.weight(1f),
         )
+        if (onGoRush != null) {
+            TextButton(onClick = onGoRush) { Text("去抢课", color = fg) }
+        }
         TextButton(onClick = onDismiss) { Text("知道了", color = fg) }
     }
 }

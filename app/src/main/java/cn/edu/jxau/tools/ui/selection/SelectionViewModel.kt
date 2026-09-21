@@ -78,6 +78,14 @@ data class SelectionUiState(
 data class WriteNotice(
     val text: String,
     val warning: Boolean,
+    /**
+     * 提示条上是否给一个「去抢课」按钮。
+     *
+     * 只有「加入抢课队列」的提示需要：抢课任务与课程列表现在同属「选课」一页，
+     * 但用户此刻停在「课程」这一半，得有一步就能过去的入口。
+     * 已经在队列里（重复添加）时不给按钮 —— 没什么可看的。
+     */
+    val offerRushJump: Boolean = false,
 )
 
 /**
@@ -117,6 +125,14 @@ class SelectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _state = MutableStateFlow(SelectionUiState())
     val state: StateFlow<SelectionUiState> = _state.asStateFlow()
+
+    /**
+     * 抢课队列。给内层 Tab 显示排队数用（「抢课任务（3）」）。
+     *
+     * 与 [cn.edu.jxau.tools.ui.rush.RushViewModel] 订阅的是**同一个 [RushStore] 单例**，
+     * 所以不存在两份状态、也不需要页面之间传参。
+     */
+    val rushTasks = RushStore.get(application).tasks
 
     /** 树只拉一次，切范围不重复请求 */
     private var treeLoaded = false
@@ -315,7 +331,8 @@ class SelectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     /**
      * 加入抢课队列（不立即提交）。去重规则在 [RushStore.add]：同一教学班只留一条未终结任务。
-     * 提示复用 [WriteNotice]，成功也要说清楚「去哪执行」——抢课页不是这个页面。
+     * 提示复用 [WriteNotice]；**不自动跳到抢课那一半**——用户常常在一屏里连点几个「抢」，
+     * 自动切走会把这个动作打断。改成给一个「去抢课」按钮，想过去再过去。
      */
     fun addRushTask(course: CourseClass) {
         val added = RushStore.get(getApplication()).add(
@@ -332,9 +349,10 @@ class SelectionViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update {
             it.copy(
                 notice = WriteNotice(
-                    if (added) "「${course.className}」已加入抢课队列，到「抢课」页开始执行。"
+                    if (added) "「${course.className}」已加入抢课队列。"
                     else "「${course.className}」已经在抢课队列里了。",
                     warning = !added,
+                    offerRushJump = added,
                 )
             )
         }

@@ -38,13 +38,17 @@ import cn.edu.jxau.tools.data.model.RushState
 import cn.edu.jxau.tools.data.model.RushTask
 
 /**
- * 抢课页：任务队列 + 引擎控制 + 节奏参数。
+ * 抢课：任务队列 + 引擎控制 + 节奏参数。
  *
- * **加任务在选课页**（课程行的「抢」按钮），这里只管看与跑。
+ * **加任务在「选课」页的课程列表里**（课程行的「抢」按钮），这里只管看与跑。
+ * 本页自 2026-09-21 起是「选课」页的内层视图（`SelectionTab.RUSH`），
+ * 不再是底部导航的独立一项 —— 内容与行为一行没改，只是多接一个 [modifier]
+ * 好让调用方给高度（内层视图要占满 TabRow 剩下的空间）。
+ *
  * 顶部会明示演练模式——mock 通道下所有提交都打在本机，绝不会碰到真实教务。
  */
 @Composable
-fun RushScreen(viewModel: RushViewModel = viewModel()) {
+fun RushScreen(modifier: Modifier = Modifier, viewModel: RushViewModel = viewModel()) {
     val tasks by viewModel.tasks.collectAsState()
     val config by viewModel.config.collectAsState()
     val running by viewModel.running.collectAsState()
@@ -56,7 +60,7 @@ fun RushScreen(viewModel: RushViewModel = viewModel()) {
     val pendingCount = tasks.count { it.state == RushState.WAITING }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -157,7 +161,7 @@ fun RushScreen(viewModel: RushViewModel = viewModel()) {
         if (tasks.isEmpty()) {
             Card {
                 Text(
-                    "还没有抢课任务。到「选课」页找到目标教学班，点「抢」加入队列。\n\n" +
+                    "还没有抢课任务。切到上面「课程」那一半，找到目标教学班点「抢」加入队列。\n\n" +
                         "流程：提交 → 按回执决策（成功回查已选列表确认 / 名额满继续等位 / " +
                         "明确拒绝放弃 / 会话失效自动续期再战）。",
                     style = MaterialTheme.typography.bodySmall,
