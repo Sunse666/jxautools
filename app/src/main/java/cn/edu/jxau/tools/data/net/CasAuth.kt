@@ -165,6 +165,32 @@ class CasAuth(private val profile: SiteProfile) {
             // 服务端可能沿用旧会话 → 表现为"重试多少次都拿不到 uuid"。
             Http.cookieJar.clearHost(profile.sessionHost)
 
+            // WebVPN 前置步：先拿一张 ST 交给网关换 vpn 票据，否则重写的教务地址
+            // 会被网关弹回登录页。实测链路（2026-09-21 probe_webvpn.py）：
+            // TGT→ST(service=网关回调) → GET /login?cas_login=true&ticket=ST
+            // → 302 /wengine-vpn-token-login?token=… → Set-Cookie wengine_vpn_ticket…。
+            // 注意放在 clearHost 之后：清 host 会把上一次的 vpn 票据一起清掉，正好重取。
+            if (profile.vpnTicketUrlTemplate.isNotBlank()) {
+                if (tgt.isBlank()) {
+                    JxauLog.w("WebVPN 通道缺少 TGT，无法为网关签发票据，兑换大概率失败")
+                }
+                JxauLog.i("WebVPN 前置：给网关签一张 ST（service=${profile.vpnTicketService}）")
+                val vpnSt = exchangeTgtForSt(tgt, service = profile.vpnTicketService)
+                val vpnUrl = profile.vpnTicketUrlTemplate.replace("{ST}", vpnSt)
+                execute(
+                    Http.client,
+                    Request.Builder().url(vpnUrl)
+                        .header("Sec-Fetch-Mode", "navigate")
+                        .build(),
+                ).use { resp ->
+                    val got = Http.cookieJar.hasCookie(profile.sessionHost, profile.sessionCookieName)
+                    JxauLog.i(
+                        "WebVPN 票据：HTTP ${resp.code}，" +
+                            "${profile.sessionCookieName}=${if (got) "已获取" else "缺失"}"
+                    )
+                }
+            }
+
             val redeemUrl = profile.stRedeemUrlTemplate.replace("{ST}", st)
             val request = Request.Builder()
                 .url(redeemUrl)
@@ -225,11 +251,11 @@ class CasAuth(private val profile: SiteProfile) {
         throw IllegalArgumentException("TGT 换 ST 失败，且登录响应中没有可用的 ST")
     }
 
-    /** TGT → 一次性 ST。返回的 ST 是纯文本，形如 `ST-xxxx-xxxx` */
-    private fun exchangeTgtForSt(tgt: String): String {
+    /** TGT → 一次性 ST。返回的 ST 是纯文本，形如 `ST-xxxx-xxxx`。[service] 决定票据签给谁 */
+    private fun exchangeTgtForSt(tgt: String, service: String = profile.stService): String {
         val url = profile.tgtToStUrlTemplate.replace("{TGT}", tgt)
         val body = FormBody.Builder()
-            .add("service", profile.stService)
+            .add("service", service)
             .add("loginToken", "loginToken")
             .build()
         val request = Request.Builder()

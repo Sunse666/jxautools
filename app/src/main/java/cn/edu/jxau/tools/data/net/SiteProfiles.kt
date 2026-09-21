@@ -28,6 +28,13 @@ data class SiteProfile(
     val tgtToStUrlTemplate: String,
     /** 换 ST 时提交的 service（服务端要的是教务系统的回调地址） */
     val stService: String,
+    /**
+     * WebVPN 专用前置步：兑换教务会话**之前**，先拿一张 ST 交给网关换 vpn 票据，
+     * 这里填给这张 ST 的 service。空串 = 该通道无此前置步（直连/演练）。
+     */
+    val vpnTicketService: String = "",
+    /** WebVPN 专用前置步：网关消费 ST 的地址，`{ST}` 占位。空串 = 无。 */
+    val vpnTicketUrlTemplate: String = "",
     /** GET ?ticket={ST}，跟随跳转后 URL 里含 UUID，Cookie 即会话 */
     val stRedeemUrlTemplate: String,
     /** 会话校验/保活：GET 此地址，302 到 login 或正文含标记即失效 */
@@ -73,30 +80,36 @@ object SiteProfiles {
     /**
      * WebVPN 通道。
      *
-     * ⚠️ 诚实标注：脚本在 WebVPN 模式下走的是 Playwright 浏览器（人工登录后从网络流里捞
-     * TGT 与 wengine 票据），**没有**实现协议登录。这里的 CAS 路径是从脚本的
-     * step1/step2 模板反推出来的，属于「推测可用的尝试」，首次使用必须看日志确认。
-     * 若失败，下一步用内嵌 WebView 取票实现（已在计划里）。
+     * ✅ 2026-09-21 协议登录实测通过（`tools/probe_webvpn.py` 六步全绿，含验证码登录）。
+     * 关键事实（与旧版反推 profile 的差异）：
+     * 1. WebVPN 门户**本身靠学校 CAS 认证**：`/login` 302 到重写 CAS，
+     *    service = 网关回调 `/login?cas_login=true`；
+     * 2. CAS REST 路径与直连同构（`/cas/v1/tickets`，POST 登录返回 `{tgt, ticket}`），
+     *    旧版写的 `lyuapServer` 不存在；
+     * 3. 兑换教务会话**之前**必须先把一张 ST 交给网关换 `wengine_vpn_ticket` Cookie
+     *    （回调 302 `/wengine-vpn-token-login?token=…` 时下发），否则重写的教务地址
+     *    全部被网关弹回登录页；
+     * 4. 重写后的地址**不需要** `?vpn-12-o2-…` 参数（实测 Main/Index 与数据接口裸路径都通）。
      */
     val WEBVPN = SiteProfile(
         channel = Channel.WEBVPN,
         label = "WebVPN 重写通道",
         casLoginUrl = "$VPN_HOST/https/$VPN_PREFIX_CAS/cas/login" +
-            "?service=https://jwgl.jxau.edu.cn/User/CheckTicketFromSSo",
+            "?service=https%3A%2F%2Fwebvpnnew.jxau.edu.cn%2Flogin%3Fcas_login%3Dtrue",
         casKaptchaUrl = "$VPN_HOST/https/$VPN_PREFIX_CAS/cas/kaptcha",
-        casTicketsUrl = "$VPN_HOST/https/$VPN_PREFIX_CAS/lyuapServer/v1/tickets",
-        serviceForLogin = "https://jwgl.jxau.edu.cn/User/CheckTicketFromSSo",
-        tgtToStUrlTemplate = "$VPN_HOST/https/$VPN_PREFIX_CAS/lyuapServer/v1/tickets/{TGT}" +
-            "?vpn-12-o2-cas.jxau.edu.cn",
+        casTicketsUrl = "$VPN_HOST/https/$VPN_PREFIX_CAS/cas/v1/tickets",
+        serviceForLogin = "https://webvpnnew.jxau.edu.cn/login?cas_login=true",
+        tgtToStUrlTemplate = "$VPN_HOST/https/$VPN_PREFIX_CAS/cas/v1/tickets/{TGT}",
         stService = "https://jwgl.jxau.edu.cn/User/CheckTicketFromSSo",
+        vpnTicketService = "https://webvpnnew.jxau.edu.cn/login?cas_login=true",
+        vpnTicketUrlTemplate = "$VPN_HOST/login?cas_login=true&ticket={ST}",
         stRedeemUrlTemplate = "$VPN_HOST/https/$VPN_PREFIX_JWGL/User/CheckTicketFromSSo?ticket={ST}",
-        mainIndexUrlTemplate = "$VPN_HOST/https/$VPN_PREFIX_JWGL/Main/Index/{UUID}" +
-            "?vpn-12-o2-jwgl.jxau.edu.cn",
+        mainIndexUrlTemplate = "$VPN_HOST/https/$VPN_PREFIX_JWGL/Main/Index/{UUID}",
         sessionCookieName = "wengine_vpn_ticketwebvpnnew_jxau_edu_cn",
         sessionHost = "webvpnnew.jxau.edu.cn",
         apiBase = "$VPN_HOST/https/$VPN_PREFIX_JWGL",
-        protocolLoginVerified = false,
-        note = "CAS 路径为反推，未经实测；失败请查看日志",
+        protocolLoginVerified = true,
+        note = "2026-09-21 probe_webvpn.py 实测通过（验证码登录/换票/vpn票据/兑换/数据接口）",
     )
 
     /**
