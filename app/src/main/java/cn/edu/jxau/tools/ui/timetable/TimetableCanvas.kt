@@ -85,7 +85,6 @@ internal fun WeekTable(
     onPick: ((List<CourseSlot>) -> Unit)? = null,
 ) {
     val todayColumn = if (week == todayWeek) LocalDate.now().dayOfWeek.value else 0
-    val lastPeriod = grid.periodCount - 1
     // 表头与网格**共用同一个横向滚动状态**：一个是列标题、一个是列内容，
     // 各用各的 state 必然滚出「标题和列错位」。
     val hScroll = rememberScrollState()
@@ -140,12 +139,14 @@ internal fun WeekTable(
                 .weight(1f)
                 .verticalScroll(vScroll),
         ) {
-            Column(modifier = Modifier.width(TimetableSizeSpec.AXIS_WIDTH.dp)) {
+            Column(
+                modifier = Modifier.width(TimetableSizeSpec.AXIS_WIDTH.dp),
+                // 与 DayColumn 的行模型一致（每行 = 单节高 + 行间真空隙）：
+                // 轴上的数字才会落在它所标的那一行的中线，而不是偏下半个间隙
+                verticalArrangement = Arrangement.spacedBy(TimetableSizeSpec.PERIOD_GAP.dp),
+            ) {
                 repeat(grid.periodCount) { i ->
-                    PeriodAxisCell(
-                        number = i + 1,
-                        height = if (i == lastPeriod) size.periodHeightDp.dp else size.pitchDp.dp,
-                    )
+                    PeriodAxisCell(number = i + 1, height = size.periodHeightDp.dp)
                 }
             }
 
@@ -206,8 +207,14 @@ private fun PeriodAxisCell(number: Int, height: Dp) {
 
 /**
  * 一天的列：底纹打底（**奇偶两档都有色**，行连续不按午晚休分段），课块按节次绝对定位。
- * 连堂课纵向合并：块高 = span × 单节高 + (span-1) × 间隙，与节次轴逐节对齐
- * （对齐关系由 [TimetableSize.blockHeightDp] / [TimetableSize.rowBottomDp] 保证并自检）。
+ *
+ * ## 行高模型（这行代码踩过坑，别改回去）
+ * 每一格的高度是 `periodHeightDp`，行与行之间用 [Arrangement.spacedBy] 留出**真空隙**。
+ * 早先写成「每行高度 = [TimetableSize.pitchDp]（把行尾空隙算进行内）」，总高一样、
+ * 轴上数字也不偏，但**行的可见矩形多探出 3dp**：课块底边之下就露出一条底纹填充，
+ * 屏幕上就是「色块矮了一点、底下漏背景」。块高 [TimetableSize.blockHeightDp] 是按
+ * 「行高 = 单节高 + 间隙」写的，渲染必须同一个模型，对齐关系由
+ * [TimetableSize.fitsCells] 断言（自检里有穷举）。
  *
  * 两档底色 + 描边见 [TimetableSurface]：早先「奇数行透明」的写法让 1/3/5/7/9/11 节
  * 与页面背景同色，那些行等于没有格子。
@@ -229,15 +236,16 @@ private fun DayColumn(
             outline = scheme.outline,
         )
     }
+    val inset = TimetableSizeSpec.CELL_INSET_DP.dp
 
     Box(modifier = modifier.clip(ZEBRA_SHAPE)) {
-        Column {
+        Column(verticalArrangement = Arrangement.spacedBy(TimetableSizeSpec.PERIOD_GAP.dp)) {
             repeat(periodCount) { i ->
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(if (i == periodCount - 1) size.periodHeightDp.dp else size.pitchDp.dp)
-                        .padding(vertical = 1.dp)
+                        .height(size.periodHeightDp.dp)
+                        .padding(vertical = inset)
                         .background(if (i % 2 == 0) stripes.oddRow else stripes.evenRow, ZEBRA_SHAPE)
                         .border(1.dp, stripes.border, ZEBRA_SHAPE),
                 )
@@ -290,7 +298,8 @@ private fun CourseBlock(
 
     Row(
         modifier = modifier
-            .padding(all = 1.dp)
+            // 与底纹格同一个内缩量（CELL_INSET_DP）：块的可见矩形才正好等于它覆盖的格子
+            .padding(all = TimetableSizeSpec.CELL_INSET_DP.dp)
             .clip(BLOCK_SHAPE)
             .background(theme.container)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),

@@ -81,6 +81,15 @@ object TimetableSizeSpec {
     const val PERIOD_GAP = 3
     const val COLUMN_GAP = 3
 
+    /**
+     * 底纹格与课块四周的内缩量。
+     *
+     * 两者**必须用同一个值**：课块要正好盖住它覆盖的底纹格，任一侧内缩不同就会在像素上
+     * 露出一条背景（"色块矮了一点、底下漏背景"就是这么来的）。
+     * 对齐关系由 [TimetableSize.fitsCells] 断言，不靠肉眼看。
+     */
+    const val CELL_INSET_DP = 1
+
     /** 节次轴列宽：数字 + 上午/下午/晚上小字 */
     const val AXIS_WIDTH = 30
 
@@ -217,6 +226,53 @@ object TimetableSizeSpec {
             check("h=$h 块[$from..${from + span - 1}]对齐末节行底", bottom, s.rowBottomDp(from + span - 1), out)
         }
 
+        // ---- 可见矩形贴合：课块必须正好盖住它覆盖的那些底纹格 ----
+        // 这是「色块底下漏背景」缺陷的判据。上面那条「块底边落在行底边上」用的是**外框**，
+        // 两种行高模型都能满足它，所以它放过了这个缺陷；只有比可见矩形（内缩之后的）才抓得住。
+        check("h=64 格1可见顶", d.cellVisibleTopDp(1), 1, out)
+        check("h=64 格5可见顶", d.cellVisibleTopDp(5), 269, out)
+        check("h=64 格1可见底", d.cellVisibleBottomDp(1), 62, out)
+        check("h=64 格2可见底", d.cellVisibleBottomDp(2), 129, out)
+        check("h=64 格11可见底", d.cellVisibleBottomDp(11), 732, out)
+        check("h=64 格可见高", d.cellVisibleBottomDp(1) - d.cellVisibleTopDp(1) + 1, 62, out)
+        check("h=64 块1-1可见顶", d.blockVisibleTopDp(1), 1, out)
+        check("h=64 块1-1可见底", d.blockVisibleBottomDp(1, 1), 62, out)
+        check("h=64 块1-2可见底", d.blockVisibleBottomDp(1, 2), 129, out)
+        check("h=64 块5-3可见底", d.blockVisibleBottomDp(5, 3), 464, out)
+        check("h=64 块7-2可见底", d.blockVisibleBottomDp(7, 2), 531, out)
+        check("h=76 块3-2可见底", TimetableSize(periodHeightDp = 76).blockVisibleBottomDp(3, 2), 311, out)
+        check("h=52 块9-3可见底", TimetableSize(periodHeightDp = 52).blockVisibleBottomDp(9, 3), 600, out)
+        check("h=58 块1-8可见底", TimetableSize(periodHeightDp = 58).blockVisibleBottomDp(1, 8), 483, out)
+        check("h=70 块4-1可见底", TimetableSize(periodHeightDp = 70).blockVisibleBottomDp(4, 1), 287, out)
+        // 穷举：5 档高度 × 11 个起点 × 到学期末的所有跨度，一个都不许差
+        var fitCases = 0
+        var fitBad = 0
+        HEIGHT_LEVELS.forEach { h ->
+            val s = TimetableSize(periodHeightDp = h)
+            for (from in 1..11) {
+                for (span in 1..(11 - from + 1)) {
+                    fitCases++
+                    if (!s.fitsCells(from, span)) fitBad++
+                }
+            }
+        }
+        check("穷举贴合 5档×起止组合", fitBad, 0, out)
+        check("穷举覆盖用例数", fitCases, 5 * (11 + 10 + 9 + 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1), out)
+
+        // 变异探针：旧渲染把整行高度当成 pitch（行尾空隙算进行内），
+        // 于是行可见底边比课块可见底边**低整整一个 PERIOD_GAP** ——
+        // 这就是真机上量到的那条背景。把旧模型固化成断言，证明这组用例确实有判别力。
+        HEIGHT_LEVELS.forEach { h ->
+            val s = TimetableSize(periodHeightDp = h)
+            val legacyRow1Bottom = s.cellTopDp(1) + s.pitchDp - 1 - TimetableSizeSpec.CELL_INSET_DP
+            check(
+                "变异探针 h=$h 旧行高模型漏底",
+                legacyRow1Bottom - s.blockVisibleBottomDp(1, 1),
+                TimetableSizeSpec.PERIOD_GAP,
+                out,
+            )
+        }
+
         // ---- 默认值判定（「恢复默认」按钮的可用状态） ----
         check("默认即默认", TimetableSize.DEFAULT.isDefault, true, out)
         check("只改高度", TimetableSize(periodHeightDp = 58).isDefault, false, out)
@@ -259,11 +315,47 @@ data class TimetableSize(
     val isDefault: Boolean
         get() = periodHeightDp == TimetableSizeSpec.DEFAULT_HEIGHT && columnWidthDp == TimetableSizeSpec.DEFAULT_WIDTH
 
+    /**
+     * 第 [period] 节底纹格的**外框**顶边。
+     *
+     * 行高 = 单节高，行与行之间留 [TimetableSizeSpec.PERIOD_GAP] 的真空隙 ——
+     * **不是**「行高 = [pitchDp]，空隙算在行内」。这两种写法总高相同（都是
+     * `(n-1)*pitch + h`），所以轴总高、块底边这些量两种写法都对得上，
+     * 但行的**可见矩形**差整整一个 PERIOD_GAP：后者会让最后面的格子探出课块下方 3dp，
+     * 屏幕上就是「色块底下漏一条背景」。块高公式 [blockHeightDp] 是按前者写的，
+     * 所以渲染也必须按前者，见 [fitsCells]。
+     */
+    fun cellTopDp(period: Int): Int = pitchDp * max(period - 1, 0)
+
+    /** 第 [period] 节底纹格的可见顶边（含） */
+    fun cellVisibleTopDp(period: Int): Int = cellTopDp(period) + TimetableSizeSpec.CELL_INSET_DP
+
+    /** 第 [period] 节底纹格的可见底边（含） */
+    fun cellVisibleBottomDp(period: Int): Int =
+        cellTopDp(period) + periodHeightDp - 1 - TimetableSizeSpec.CELL_INSET_DP
+
     /** 第 [from] 节的顶边（= 块顶边） */
-    fun blockTopDp(from: Int): Int = pitchDp * max(from - 1, 0)
+    fun blockTopDp(from: Int): Int = cellTopDp(from)
 
     /** 占 [span] 节的块高：span 节 + (span-1) 个间隙，正好盖住 from..from+span-1 */
     fun blockHeightDp(span: Int): Int = pitchDp * max(span, 1) - TimetableSizeSpec.PERIOD_GAP
+
+    /** 课块的可见顶边（含）。与 [cellVisibleTopDp] 同式 —— 块就坐在它第一节的格子上 */
+    fun blockVisibleTopDp(from: Int): Int = blockTopDp(from) + TimetableSizeSpec.CELL_INSET_DP
+
+    /** 课块的可见底边（含） */
+    fun blockVisibleBottomDp(from: Int, span: Int): Int =
+        blockTopDp(from) + blockHeightDp(span) - 1 - TimetableSizeSpec.CELL_INSET_DP
+
+    /**
+     * 占 [from..from+span-1] 的课块，其可见矩形是否**逐 dp 等于**它覆盖的底纹格可见矩形。
+     *
+     * 这是本轮那个「色块底下漏背景」缺陷的判据。只看总高、只看块底边落在
+     * [rowBottomDp] 上都发现不了它 —— 必须比**可见矩形**（内缩之后的那一版）。
+     */
+    fun fitsCells(from: Int, span: Int): Boolean =
+        blockVisibleTopDp(from) == cellVisibleTopDp(from) &&
+            blockVisibleBottomDp(from, span) == cellVisibleBottomDp(from + span - 1)
 
     /** 第 [period] 节的底边（= 覆盖到这一节的块的底边） */
     fun rowBottomDp(period: Int): Int = pitchDp * max(period, 1) - TimetableSizeSpec.PERIOD_GAP

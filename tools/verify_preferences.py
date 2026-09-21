@@ -19,6 +19,8 @@ WIDTH_LEVELS = [62, 68, 74, 80, 86]
 DEFAULT_HEIGHT = 64
 DEFAULT_WIDTH = 74
 PERIOD_GAP = 3
+# 底纹格/课块四周的内缩量（TimetableSizeSpec.CELL_INSET_DP）
+CELL_INSET = 1
 
 THEME_KEYS = {"system": "SYSTEM", "light": "LIGHT", "dark": "DARK"}
 
@@ -81,6 +83,41 @@ def row_bottom(h, period):
 
 def content_height(h, period_count):
     return pitch(h) * max(period_count, 1) - PERIOD_GAP
+
+
+# ---- 3b. 可见矩形贴合：课块必须正好盖住它覆盖的那些底纹格 ----
+# 行高模型：每行高 = h（不是 pitch！），行与行之间留 PERIOD_GAP 的真空隙。
+# 另一种写法（行高 = pitch，把行尾空隙算进行内）总高一样、轴总高一样、块底边也一样，
+# 但行的可见矩形多探出 PERIOD_GAP —— 这就是"色块底下漏背景"。见 legacy_row_visible_bottom。
+
+def cell_top(h, period):
+    return pitch(h) * max(period - 1, 0)
+
+
+def cell_visible_top(h, period):
+    return cell_top(h, period) + CELL_INSET
+
+
+def cell_visible_bottom(h, period):
+    return cell_top(h, period) + h - 1 - CELL_INSET
+
+
+def block_visible_top(h, frm):
+    return block_top(h, frm) + CELL_INSET
+
+
+def block_visible_bottom(h, frm, span):
+    return block_top(h, frm) + block_height(h, span) - 1 - CELL_INSET
+
+
+def fits_cells(h, frm, span):
+    return (block_visible_top(h, frm) == cell_visible_top(h, frm)
+            and block_visible_bottom(h, frm, span) == cell_visible_bottom(h, frm + span - 1))
+
+
+def legacy_row_visible_bottom(h, period):
+    """旧渲染的行可见底边：行高当 pitch，行内上下各内缩 CELL_INSET"""
+    return cell_top(h, period) + pitch(h) - 1 - CELL_INSET
 
 
 # ---- 4. 字号推导：列宽每 6dp 撑 1sp，夹在 10..15 ----
@@ -153,6 +190,42 @@ def main():
     check("h=64 第11节底边", row_bottom(64, 11), 734)
     check("h=64 轴总高", content_height(64, 11), 734)
     check("h=76 第5节顶边", block_top(76, 5), 79 * 4)
+
+    print("\n== 可见矩形贴合（色块底下漏背景的判据） ==")
+    # 期望值一个个手算，不是把上面函数的返回值回抄一遍
+    check("h=64 格1可见顶", cell_visible_top(64, 1), 1)
+    check("h=64 格5可见顶", cell_visible_top(64, 5), 269)
+    check("h=64 格1可见底", cell_visible_bottom(64, 1), 62)
+    check("h=64 格2可见底", cell_visible_bottom(64, 2), 129)
+    check("h=64 格11可见底", cell_visible_bottom(64, 11), 732)
+    check("h=64 格可见高", cell_visible_bottom(64, 1) - cell_visible_top(64, 1) + 1, 62)
+    check("h=64 块1-1可见顶", block_visible_top(64, 1), 1)
+    check("h=64 块1-1可见底", block_visible_bottom(64, 1, 1), 62)
+    check("h=64 块1-2可见底", block_visible_bottom(64, 1, 2), 129)
+    check("h=64 块5-3可见底", block_visible_bottom(64, 5, 3), 464)
+    check("h=64 块7-2可见底", block_visible_bottom(64, 7, 2), 531)
+    check("h=76 块3-2可见底", block_visible_bottom(76, 3, 2), 311)
+    check("h=52 块9-3可见底", block_visible_bottom(52, 9, 3), 600)
+    check("h=58 块1-8可见底", block_visible_bottom(58, 1, 8), 483)
+    check("h=70 块4-1可见底", block_visible_bottom(70, 4, 1), 287)
+
+    # 穷举：5 档高度 × 11 个起点 × 到学期末的所有跨度（= 5 × 66 = 330 例）
+    cases = bad = 0
+    for h in HEIGHT_LEVELS:
+        for frm in range(1, 12):
+            for span in range(1, 12 - frm + 1):
+                cases += 1
+                if not fits_cells(h, frm, span):
+                    bad += 1
+                    if bad <= 5:
+                        print(f"  FAIL h={h} 块[{frm}..{frm + span - 1}] 可见矩形与格子不符")
+    check("穷举贴合 5档×起止组合", bad, 0)
+    check("穷举覆盖用例数", cases, 5 * sum(range(1, 12)))
+
+    # 变异探针：旧行高模型（行高 = pitch）的可见底边比块可见底边低整整一个 PERIOD_GAP
+    for h in HEIGHT_LEVELS:
+        check(f"变异探针 h={h} 旧行高模型漏出", legacy_row_visible_bottom(h, 1) - block_visible_bottom(h, 1, 1),
+              PERIOD_GAP)
 
     if FAILS:
         print(f"\n{len(FAILS)} 项不一致：{FAILS}")
