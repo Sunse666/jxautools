@@ -3,6 +3,7 @@ package cn.edu.jxau.tools.core
 import cn.edu.jxau.tools.data.SessionValidation
 import cn.edu.jxau.tools.data.export.ExamIcs
 import cn.edu.jxau.tools.data.export.IcsWriter
+import cn.edu.jxau.tools.data.model.AdvisorPlanTest
 import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.GradeStats
 import cn.edu.jxau.tools.data.model.RushPolicy
@@ -11,6 +12,8 @@ import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
+import cn.edu.jxau.tools.data.model.XueJiChangeSchema
+import cn.edu.jxau.tools.data.model.XueJiSchema
 import cn.edu.jxau.tools.data.net.CasRsa
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.theme.JxauPalette
@@ -77,6 +80,9 @@ object SelfTest {
         report("课表空格底纹", TimetableSurface.selfTest())
         report("日历写出（折行/转义/时区）", IcsWriter.selfTest())
         report("考试时间解析", ExamIcs.selfTest())
+        report("学籍档案字段与隐私遮蔽", XueJiSchema.selfTest())
+        report("学籍异动记录", XueJiChangeSchema.selfTest())
+        report("导师与学期规划", AdvisorPlanTest.selfTest())
         JxauLog.i("=== 全部自检：$passed/$total 通过 ===")
         return passed to total
     }

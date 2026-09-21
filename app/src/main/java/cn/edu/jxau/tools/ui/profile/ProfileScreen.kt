@@ -24,8 +24,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
@@ -73,7 +76,10 @@ import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
+import cn.edu.jxau.tools.ui.advisor.AdvisorScreen
 import cn.edu.jxau.tools.ui.exam.ExamScreen
+import cn.edu.jxau.tools.ui.plan.PlanScreen
+import cn.edu.jxau.tools.ui.student.StudentScreen
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.timetable.WeekTable
 import java.time.LocalDate
@@ -118,6 +124,9 @@ fun ProfileScreen(viewModel: ProfileViewModel = viewModel()) {
 private enum class ProfilePage(val title: String, val icon: ImageVector) {
     // ---- 我的信息（教务系统里的本人资料，只读） ----
     Exam("考试安排", Icons.Filled.DateRange),
+    XueJi("学籍信息", Icons.Filled.AccountBox),
+    Advisor("导师信息", Icons.Filled.AccountCircle),
+    TermPlan("学期规划", Icons.Filled.Create),
 
     // ---- 设置 ----
     Appearance("外观主题", Icons.Filled.Settings),
@@ -177,6 +186,24 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
                 summary = "本学期考试时间与考场",
                 onOpen = onOpen,
                 showDivider = false,
+            )
+            NavRow(
+                page = ProfilePage.XueJi,
+                title = "学籍信息",
+                summary = "学号、院系专业、学籍状态（身份证等默认遮蔽）",
+                onOpen = onOpen,
+            )
+            NavRow(
+                page = ProfilePage.Advisor,
+                title = "导师信息",
+                summary = "各学期的导师组成员",
+                onOpen = onOpen,
+            )
+            NavRow(
+                page = ProfilePage.TermPlan,
+                title = "学期规划",
+                summary = "本人规划 · 导师方案与评价",
+                onOpen = onOpen,
             )
         }
 
@@ -270,6 +297,10 @@ private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBac
     when (page) {
         // 考试安排在 exam 包里，自带外壳（DetailScaffold）与自己的 ViewModel
         ProfilePage.Exam -> ExamScreen(onBack = onBack)
+        // 学籍 / 导师 / 学期规划同理，各自一个包一套 ViewModel
+        ProfilePage.XueJi -> StudentScreen(onBack = onBack)
+        ProfilePage.Advisor -> AdvisorScreen(onBack = onBack)
+        ProfilePage.TermPlan -> PlanScreen(onBack = onBack)
         ProfilePage.Appearance -> AppearancePage(viewModel, onBack)
         ProfilePage.Timetable -> TimetableSizePage(viewModel, onBack)
         ProfilePage.WeekAnchor -> WeekAnchorPage(viewModel, onBack)
@@ -788,7 +819,8 @@ private fun DiagnosticsPage(onBack: () -> Unit) {
                 "以下纯计算逻辑每次启动都会自动跑一遍，失败项以 [E] 写进日志：" +
                     "密码 RSA 加密、周次解析、教学周推算、课表格子归纳、成绩统计口径、" +
                     "选课容量与汇总、会话失效判定、抢课回执决策、外观与课表尺寸偏好、" +
-                    "课程块配色、主题色派生、课表空格底纹。",
+                    "课程块配色、主题色派生、课表空格底纹、日历写出与考试时间解析、" +
+                    "学籍档案字段白名单与隐私遮蔽、导师与学期规划。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -851,19 +883,7 @@ private fun AboutPage(onBack: () -> Unit) {
 
 // ---------- 通用小件 ----------
 
-@Composable
-private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            content()
-        }
-    }
-}
+// `SectionCard` / `InfoRow` 已移到 DetailParts.kt（考试、学籍、导师、学期规划几个子页共用一份）
 
 /** 带标题的设置分组：一组入口行装在卡片里，行间自动加分隔线 */
 @Composable
@@ -924,23 +944,6 @@ private fun ColumnScope.NavRow(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.outline,
-        )
-    }
-}
-
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(modifier = Modifier.padding(vertical = 3.dp)) {
-        Text(
-            label,
-            modifier = Modifier.padding(end = 12.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(1f),
         )
     }
 }

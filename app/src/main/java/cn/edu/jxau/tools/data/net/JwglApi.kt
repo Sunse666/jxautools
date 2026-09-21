@@ -1,15 +1,25 @@
 package cn.edu.jxau.tools.data.net
 
 import cn.edu.jxau.tools.core.JxauLog
+import cn.edu.jxau.tools.data.model.AdvisorRecord
 import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.ExamItem
 import cn.edu.jxau.tools.data.model.GradeItem
+import cn.edu.jxau.tools.data.model.PlanBook
+import cn.edu.jxau.tools.data.model.PlanItem
+import cn.edu.jxau.tools.data.model.ProfileGroup
 import cn.edu.jxau.tools.data.model.SelectionScope
+import cn.edu.jxau.tools.data.model.ServerDate
 import cn.edu.jxau.tools.data.model.Term
+import cn.edu.jxau.tools.data.model.TermPlan
 import cn.edu.jxau.tools.data.model.TicketCheckState
 import cn.edu.jxau.tools.data.model.WeekParser
 import cn.edu.jxau.tools.data.model.WriteResult
+import cn.edu.jxau.tools.data.model.XueJiChange
+import cn.edu.jxau.tools.data.model.XueJiChangeSchema
+import cn.edu.jxau.tools.data.model.XueJiSchema
+import cn.edu.jxau.tools.data.model.splitTeachers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -306,6 +316,129 @@ class JwglApi(
         }
     }
 
+    // ---------- 学籍 / 导师 / 学期规划 ----------
+
+    /**
+     * 学籍档案（`GetUserInfo`）。
+     *
+     * ## ⚠️ 这个接口的 `Result` 是 `false`，而 `Data` 是完整的
+     * 实测返回 `"Result": false, "totalCount": 0`，但 `Data[0]` 是 76 个字段的完整档案。
+     * 写成 `if (json.bool("Result") == true)` 会把整页判成失败 —— 这是本项目 `Result` 不可信的
+     * **第 4 个实例**（前三个：`totalCount` 给 0、`xklb=已选课程` 给 100、`GetGxkcTree` 给裸数组）。
+     * 所以这里和别处一样：**只看能不能解析出 `Data`**。
+     *
+     * ## 🔒 隐私
+     * 返回的结构里含身份证号、考生号、家庭住址、邮编。它们照常进 [ProfileGroup]，
+     * 但**绝不进日志、绝不进导出**（[XueJiSchema] 的白名单里有它们的字段名，
+     * 界面层默认遮蔽）。改这个方法时不要顺手把整行打进日志。
+     *
+     * 返回 null = 请求失败；返回空列表 = 成功但服务端没给档案（不该发生，但别当成失败）。
+     */
+    suspend fun fetchStudentProfile(): List<ProfileGroup>? {
+        val rows = fetchAllRows(EP_XUEJI, emptyList(), pageSize = 20) ?: return null
+        val row = rows.firstOrNull() ?: return emptyList()
+        return XueJiSchema.build(row.toStringMap())
+    }
+
+    /**
+     * 学籍异动记录（`XueJiYiDongList`）。教务页面里它是「学籍基本信息」旁的第二个 tab。
+     *
+     * 实测当前账号 0 行（`Result: false` + 空数组）—— 空是正常状态，不是失败。
+     * 返回 null 才是失败。
+     */
+    suspend fun fetchXueJiChanges(): List<XueJiChange>? {
+        val rows = fetchAllRows(EP_XUEJI_CHANGES, emptyList(), pageSize = 50) ?: return null
+        return rows.map { XueJiChangeSchema.build(it.toStringMap()) }
+    }
+
+    /**
+     * 导师信息（`GetMyDaoshiList`）。**一个学期一条**（实测 2 行 = 两个学期）。
+     *
+     * 注意这里**没有职称、没有联系方式**：接口 30 个字段里能对外显示的只有导师姓名串、
+     * 导师组编号、类型、关联状态、擅长领域、学员要求。详见 [AdvisorRecord] 的注释。
+     */
+    suspend fun fetchAdvisors(): List<AdvisorRecord>? {
+        val rows = fetchAllRows(EP_ADVISORS, emptyList(), pageSize = 100) ?: return null
+        return rows.map { row ->
+            AdvisorRecord(
+                termCode = row.str("Xq").orEmpty(),
+                groupCode = row.str("DsCode").orEmpty(),
+                teachers = splitTeachers(row.str("DsTeacher").orEmpty()),
+                type = row.str("DsType").orEmpty(),
+                state = row.str("NowState").orEmpty(),
+                stateAt = ServerDate.parse(row.str("NowStateTime").orEmpty()),
+                strength = row.str("Scly").orEmpty(),
+                requirement = row.str("Xyyq").orEmpty(),
+                linkedAt = ServerDate.parse(row.str("CreateTime").orEmpty()),
+            )
+        }
+    }
+
+    /**
+     * 学期规划（`GetMyXqPlanList`）。同样一个学期一条。
+     *
+     * 返回的 [TermPlan] 里 `books` / `items` 都是 null —— 明细要另发两次请求
+     * （见 [fetchPlanBooks] / [fetchPlanItems]），由调用方决定要不要拉。
+     */
+    suspend fun fetchTermPlans(): List<TermPlan>? {
+        val rows = fetchAllRows(EP_XQ_PLAN, emptyList(), pageSize = 100) ?: return null
+        return rows.map { row ->
+            TermPlan(
+                termCode = row.str("Xq").orEmpty(),
+                selfPlan = row.str("ZwXqgh").orEmpty(),
+                advisorPlan = row.str("DsZdfa").orEmpty(),
+                advisorPlanBy = row.str("DsZdfaCreateBy").orEmpty(),
+                advisorPlanAt = ServerDate.parse(row.str("DsZdfaTime").orEmpty()),
+                advisorRating = row.str("Dspj").orEmpty(),
+                advisorAdvice = row.str("Dsjy").orEmpty(),
+                adviceBy = row.str("DspjCreateBy").orEmpty(),
+                adviceAt = ServerDate.parse(row.str("DspjTime").orEmpty()),
+                lastSelfReview = row.str("Zwpj").orEmpty(),
+                foreignLevel = row.str("Wysp").orEmpty(),
+                foreignType = row.str("Wysplx").orEmpty(),
+                planReadState = row.str("XsReadZdfaState").orEmpty(),
+                bookCount = row.int("XsBookCount") ?: 0,
+                itemCount = row.int("XsZysyCount") ?: 0,
+            )
+        }
+    }
+
+    /**
+     * 阅读书目明细（`GetMyBookReadList`）。
+     *
+     * ## ⚠️ 必须带 `Xq`，否则拿到 1443 字节的 HTML 错误页
+     * 不带学期参数时这个接口返回「没有权限访问该页面」错误页，很容易误判成「接口不可用」。
+     * 实测带上 `Xq` 立刻正常返回（20251 → 2 行，20252 → 2 行，与父表的 `XsBookCount` 逐个对得上）。
+     * 这是「错误页 ≠ 接口不存在」的第 N 个实例，也是本项目最容易踩的一类坑。
+     *
+     * 可以只传 `Xq` 不传 `Xh`：服务端按会话里的身份取本人数据。
+     */
+    suspend fun fetchPlanBooks(term: String): List<PlanBook>? {
+        val rows = fetchAllRows(EP_PLAN_BOOKS, listOf("Xq" to term), pageSize = 100) ?: return null
+        return rows.map { row ->
+            PlanBook(
+                name = row.str("BookName").orEmpty(),
+                readAt = ServerDate.parse(row.str("ReadTime").orEmpty()),
+            )
+        }
+    }
+
+    /**
+     * 专业素养明细（`GetMyZysyList`）。**同样必须带 `Xq`**，理由见 [fetchPlanBooks]。
+     *
+     * 实测 20251 → 4 行（父表 `XsZysyCount` = 4），20252 → 0 行（父表 = 0），四处样本全部一致。
+     */
+    suspend fun fetchPlanItems(term: String): List<PlanItem>? {
+        val rows = fetchAllRows(EP_PLAN_ITEMS, listOf("Xq" to term), pageSize = 100) ?: return null
+        return rows.map { row ->
+            PlanItem(
+                name = row.str("ItemName").orEmpty(),
+                type = row.str("ItemType").orEmpty(),
+                at = ServerDate.parse(row.str("ItemTime").orEmpty()),
+            )
+        }
+    }
+
     /**
      * 校验当前 guid 的会话票据是否有效。
      *
@@ -505,6 +638,22 @@ class JwglApi(
         (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.toBooleanStrictOrNull()
 
     /**
+     * 一行 JSON → 「字段名 → 原文」。
+     *
+     * 给白名单式的模型（学籍档案 / 学籍异动）用：它们只在**已知字段**上取值，
+     * 所以这里不做任何类型转换，谁要什么自己转 —— 转换规则属于模型层，
+     * 散在接口层会让「这个字段到底怎么解析」变成需要到处找的事。
+     *
+     * null 与空串统一成空串：对这两个模型来说「服务端给了 null」和「给了空串」
+     * 是同一件事（都是「没有这个值」），区分它们没有意义。
+     */
+    private fun JsonObject.toStringMap(): Map<String, String> =
+        entries.mapNotNull { (key, value) ->
+            val primitive = value as? JsonPrimitive ?: return@mapNotNull null
+            primitive.contentOrNull?.let { key to it }
+        }.toMap()
+
+    /**
      * `GetKcInfo` 的一行 → [CourseClass]。
      *
      * 缺 `JxbBh` 返回 null（调用方会剔除并告警）——它是选退课的唯一凭据，
@@ -587,11 +736,22 @@ class JwglApi(
         private const val EP_XK_BATCHES = "KcManage/GxKcManage/Getxkqq"
         private const val EP_EXAMS = "PaiKaoManage/KaoShiAnPaiChaXunManage/GetKaoShiInfo_Student"
         private const val EP_SCORES = "SystemManage/CJManage/GetXsCjByXh"
+        private const val EP_XUEJI = "XueJiManage/XueJiManage/GetUserInfo"
+        private const val EP_XUEJI_CHANGES = "XueJiManage/XueJiManage/XueJiYiDongList"
+        private const val EP_ADVISORS = "OneInfoManage/StudentDaoshiInfo/GetMyDaoshiList"
+        private const val EP_XQ_PLAN = "OneInfoManage/StudentDaoshiInfo/GetMyXqPlanList"
+
+        /** ⚠️ 这两个**必须带 `Xq`**，不带就是 1443 字节错误页 */
+        private const val EP_PLAN_BOOKS = "OneInfoManage/StudentDaoshiInfo/GetMyBookReadList"
+        private const val EP_PLAN_ITEMS = "OneInfoManage/StudentDaoshiInfo/GetMyZysyList"
 
         // 页面路径（仅用于 Referer）
         val PAGE_TIMETABLE = "PaikeManage/KebiaoInfo/GetStudentkebiao"
         val PAGE_XK_LIST = "KcManage/GxkcManage/XKStudentList"
         val PAGE_EXAMS = "PaiKaoManage/KaoShiAnPaiChaXunManage/Ksapcx_Student"
         val PAGE_SCORES = "SystemManage/PersonalScoreLookFor/PersonalScoreLookFor"
+        val PAGE_XUEJI = "XueJiManage/XueJiManage/ViewXueJiInfo"
+        val PAGE_ADVISORS = "OneInfoManage/StudentDaoshiInfo/MyDaoshiInfo"
+        val PAGE_XQ_PLAN = "OneInfoManage/StudentDaoshiInfo/MyXqPlan"
     }
 }
