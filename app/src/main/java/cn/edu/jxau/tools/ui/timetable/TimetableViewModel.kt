@@ -8,8 +8,8 @@ import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.fetchWithHeal
 import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.Term
+import cn.edu.jxau.tools.data.model.LessonGrid
 import cn.edu.jxau.tools.data.model.TimetableGrid
-import cn.edu.jxau.tools.data.model.WeekGrid
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.userMessage
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +28,7 @@ data class TimetableUiState(
     val message: String = "",
     val term: Term? = null,
     val terms: List<Term> = emptyList(),
-    val grid: WeekGrid? = null,
+    val grid: LessonGrid? = null,
     val week: Int = 1,
     val todayWeek: Int = 1,
     val maxWeek: Int = WEEK_HEAD_ROOM,
@@ -130,7 +130,7 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
                     message = if (slots.isEmpty()) "这个学期（${term.pretty()}）没有查询到课程。" else "",
                     term = term,
                     terms = terms,
-                    grid = TimetableGrid.buildWeekGrid(slots, todayWeek),
+                    grid = TimetableGrid.buildLessonGrid(slots, todayWeek),
                     week = todayWeek,
                     todayWeek = todayWeek,
                     maxWeek = maxWeek,
@@ -161,11 +161,11 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
      * 这些数量正常时全是 0。一旦不为 0，说明服务端字段形态变了（周次换了写法、星期没了），
      * 而界面只会表现为「课少了几门」——不查日志根本发现不了。
      */
-    private fun logGridDiagnostics(slots: List<CourseSlot>, grid: WeekGrid?) {
+    private fun logGridDiagnostics(slots: List<CourseSlot>, grid: LessonGrid?) {
         if (grid == null) return
         JxauLog.i(
-            "课表结构：行 ${grid.rows.map { it.label }}；" +
-                "本周条目 ${grid.entriesInWeek}，去重课程 ${grid.distinctCourses}"
+            "课表结构：节次轴 1..${grid.periodCount}；" +
+                "本周条目 ${grid.entriesInWeek}，去重课程 ${grid.dayBlockCourseCount}"
         )
         if (grid.unknownWeekCount > 0) {
             JxauLog.w("有 ${grid.unknownWeekCount} 条课的周次文本解析不出，这些课会在所有周次都显示")
@@ -173,8 +173,8 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
         if (grid.unplacedCount > 0) {
             JxauLog.e("有 ${grid.unplacedCount} 条课的星期字段解析不出，无法在表格里定位")
         }
-        if (grid.rows.any { it.orderUnknown }) {
-            JxauLog.w("以下节次文本解析不出节次号，行位置是兜底：${grid.rows.filter { it.orderUnknown }.map { it.label }}")
+        if (grid.periodUnknownCount > 0) {
+            JxauLog.e("有 ${grid.periodUnknownCount} 条课的节次文本解析不出，排不进表格：${slots.filter { it.periodLabel.isNotBlank() && TimetableGrid.parsePeriodRange(it.periodLabel) == null }.map { it.periodLabel }}")
         }
         slots.firstOrNull { it.weeks.isEmpty() }?.let {
             JxauLog.w("周次解析失败样本：course=${it.courseName} SkZhou=\"${it.weekRaw}\"")
@@ -213,7 +213,7 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** 重建某一周的表格。行集合来自整学期，所以切周时行不会跳 */
     private fun applyWeek(week: Int) {
-        val grid = TimetableGrid.buildWeekGrid(allSlots, week)
+        val grid = TimetableGrid.buildLessonGrid(allSlots, week)
         _state.update { it.copy(week = week, grid = grid) }
         JxauLog.i("切到第 $week 周：本周条目 ${grid.entriesInWeek}")
     }

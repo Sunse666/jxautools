@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>课表 UI 方案预览</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #F3F5F7; margin: 0; padding: 20px; color: #1B1B1F;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 17px; margin: 4px 0 12px; }
+
+  .rules {
+    background: #fff; border-radius: 12px; padding: 12px 16px;
+    font-size: 12.5px; color: #444746; line-height: 1.7;
+    box-shadow: 0 1px 2px rgba(0,0,0,.06); margin-bottom: 14px;
+  }
+  .rules b { color: #1B1B1F; }
+  .rules .pt { margin: 0; }
+
+  .card {
+    background: #fff; border-radius: 16px; padding: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  .tt {
+    display: grid;
+    grid-template-columns: 34px repeat(5, 1fr);
+    grid-template-rows: 30px repeat(10, 48px);
+    gap: 2px;
+  }
+  .cell { background: #FAFAFB; border-radius: 6px; }
+  .cell.today-col { background: #EEF4FF; }
+  .corner {
+    background: #fff; display: flex; align-items: flex-end; justify-content: center;
+    font-size: 10px; color: #B4B3BA; padding-bottom: 5px; border-radius: 8px 0 0 0;
+  }
+  .head { background: #fff; border-radius: 8px 8px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .head .dow { font-size: 13px; font-weight: 600; color: #49454F; }
+  .head .date { font-size: 10px; color: #9A989E; }
+  .head.today .dow, .head.today .date { color: #0B57D0; }
+
+  .slot {
+    background: #fff; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+  }
+  .slot .num { font-size: 12px; font-weight: 700; color: #8A8A8E; }
+  .slot .seg { font-size: 9px; color: #B0AFB6; writing-mode: vertical-rl; letter-spacing: 1px; }
+  .slot.today-col .num { color: #0B57D0; }
+
+  .course {
+    border-radius: 8px; padding: 5px 6px 5px 7px;
+    overflow: hidden; display: flex; flex-direction: column; gap: 1px;
+    z-index: 1;
+  }
+  .course .name { font-size: 11.5px; font-weight: 700; line-height: 1.25; }
+  .course .room { font-size: 10px; opacity: .82; }
+  .course .wk  { font-size: 9.5px; opacity: .55; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 6px 14px;
+    margin-top: 12px; padding: 0 4px;
+  }
+  .legend .item { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: #444746; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 4px; }
+
+  .note { font-size: 11px; color: #9A989E; margin-top: 10px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>课表 UI 方案预览</h1>
+
+  <div class="rules">
+    <p class="pt"><b>① 节次轴：</b>最左列固定显示 1、2、3…10，上午（1-4）/ 下午（5-8）/ 晚上（9-10）三段分组。</p>
+    <p class="pt"><b>② 连堂合并：</b>课程占几节就是 1×几的纵向矩形 —— 占 2 节 = 1×2，占 3 节 = 1×3（见周三下午的大学物理）。节次区间来自课表数据 Jieci 解析。</p>
+    <p class="pt"><b>③ 颜色：</b>按课程名哈希取色，同一门课全表同色（高等数学周一/周五同色、体育周二/周五同色）。</p>
+  </div>
+
+  <div class="card">
+    <div class="tt" id="tt"></div>
+    <div class="legend" id="legend"></div>
+    <div class="note">
+      示例数据为模拟课表（第 4 周 · 9/21-9/25），仅演示布局规则；「今天」列做淡蓝高亮。
+      课程块内展示：课程名 + 教室 + 周次。
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---- 示例数据：day 1=周一；start=起始节；span=连堂节数 ----
+  const courses = [
+    { name: "高等数学D1", room: "10栋301",   week: "1-16周", day: 1, start: 1, span: 2 },
+    { name: "大学英语",   room: "外语楼206", week: "1-16周", day: 1, start: 3, span: 2 },
+    { name: "音乐鉴赏",   room: "大礼堂",    week: "1-8周",  day: 1, start: 9, span: 2 },
+    { name: "体育Ⅱ",     room: "田径场",    week: "3-16周", day: 2, start: 3, span: 2 },
+    { name: "线性代数",   room: "10栋205",   week: "1-16周", day: 2, start: 5, span: 2 },
+    { name: "数据结构",   room: "实训楼407", week: "1-16周", day: 3, start: 1, span: 2 },
+    { name: "大学物理",   room: "物理楼102", week: "1-16周", day: 3, start: 5, span: 3 },
+    { name: "毛概",       room: "10栋108",   week: "1-16周", day: 4, start: 1, span: 2 },
+    { name: "大学化学",   room: "化学楼203", week: "1-16周", day: 4, start: 5, span: 2 },
+    { name: "大学语文",   room: "10栋302",   week: "1-16周", day: 5, start: 1, span: 2 },
+    { name: "体育Ⅱ",     room: "体操房",    week: "3-16周", day: 5, start: 5, span: 2 },
+  ];
+
+  // ---- 10 色板（浅底 + 深字，Material container 风格）----
+  const palette = [
+    { bg:"#D7E3FF", fg:"#15366F", ac:"#4C66A8" }, // 蓝
+    { bg:"#FFDFC2", fg:"#5F3B00", ac:"#A05A00" }, // 橙
+    { bg:"#C9EFC9", fg:"#124A18", ac:"#2E7D32" }, // 绿
+    { bg:"#E9DDFF", fg:"#3F1D77", ac:"#6B4FA8" }, // 紫
+    { bg:"#BDEBE4", fg:"#0E4640", ac:"#00796B" }, // 青
+    { bg:"#FFD9E2", fg:"#6D1A38", ac:"#B0456A" }, // 粉
+    { bg:"#FFE59A", fg:"#57430A", ac:"#9A7B00" }, // 黄
+    { bg:"#FFDAD6", fg:"#6E352F", ac:"#B3554D" }, // 红
+    { bg:"#DDE1FF", fg:"#26337D", ac:"#5A66C4" }, // 靛
+    { bg:"#EFDCC3", fg:"#4E3114", ac:"#8D6E4B" }, // 棕
+  ];
+  // 课程名哈希 -> 颜色（App 端按同一规则实现）
+  function courseColor(name) {
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return palette[h % palette.length];
+  }
+
+  const TODAY = 1; // 周一
+  const dows  = ["周一","周二","周三","周四","周五"];
+  const dates = ["9/21","9/22","9/23","9/24","9/25"];
+  const segs  = { 1: "上午", 5: "下午", 9: "晚上" };
+
+  const tt = document.getElementById("tt");
+  function add(cls, style) {
+    const el = document.createElement("div");
+    if (cls) el.className = cls;
+    Object.assign(el.style, style || {});
+    tt.appendChild(el);
+    return el;
+  }
+
+  // 表头
+  add("corner").textContent = "节";
+  dows.forEach((d, i) => {
+    const h = add("head" + (i + 1 === TODAY ? " today" : ""));
+    h.innerHTML = `<div class="dow">${d}</div><div class="date">${dates[i]}</div>`;
+  });
+
+  // 先铺全部底格（空格子），课程块随后覆盖
+  for (let s = 1; s <= 10; s++) {
+    // 节次轴
+    const slot = add("slot" + (s >= 1 && s <= 4 && TODAY ? "" : ""));
+    slot.innerHTML = `<span class="num">${s}</span>` + (segs[s] ? `<span class="seg">${segs[s]}</span>` : "");
+    // 5 天的空白格
+    for (let d = 1; d <= 5; d++) {
+      add("cell" + (d === TODAY ? " today-col" : ""), { gridColumn: d + 1, gridRow: s + 1 });
+    }
+  }
+
+  // 课程块：宽 1 列、高 span 节 —— 即 1×n 矩形
+  courses.forEach(c => {
+    const col = courseColor(c.name);
+    const el = add("course", {
+      gridColumn: c.day + 1,
+      gridRow: `${c.start + 1} / span ${c.span}`,
+      background: col.bg,
+      color: col.fg,
+      borderLeft: `3px solid ${col.ac}`,
+    });
+    el.innerHTML = `<div class="name">${c.name}</div><div class="room">${c.room}</div><div class="wk">${c.week}</div>`;
+  });
+
+  // 图例（同课同色去重展示）
+  const legend = document.getElementById("legend");
+  const seen = {};
+  courses.forEach(c => { if (!seen[c.name]) seen[c.name] = courseColor(c.name); });
+  Object.entries(seen).forEach(([name, col]) => {
+    const item = document.createElement("div");
+    item.className = "item";
+    item.innerHTML = `<span class="sw" style="background:${col.bg};border-left:3px solid ${col.ac}"></span>${name}`;
+    legend.appendChild(item);
+  });
+</script>
+</body>
+</html>

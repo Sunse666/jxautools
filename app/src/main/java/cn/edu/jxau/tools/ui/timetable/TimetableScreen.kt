@@ -1,7 +1,6 @@
 package cn.edu.jxau.tools.ui.timetable
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,10 +10,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,23 +53,50 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.data.model.CourseSlot
-import cn.edu.jxau.tools.data.model.PeriodRow
-import cn.edu.jxau.tools.data.model.WeekGrid
+import cn.edu.jxau.tools.data.model.LessonBlock
+import cn.edu.jxau.tools.data.model.LessonGrid
+import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
 import java.time.LocalDate
 
-/** 行标题列宽 */
-private val ROW_LABEL_WIDTH = 50.dp
+/** 节次轴列宽：数字 + 上午/下午/晚上小字 */
+private val AXIS_WIDTH = 26.dp
 
-/** 一格的固定高度。给课名 3 行 + 地点留位置，太矮就只能看到「Jav…」 */
-private val CELL_HEIGHT = 76.dp
+/** 单节基础高度。连堂块 = span × 此高 + (span-1) × 间隙，保持与轴逐节对齐 */
+private val PERIOD_HEIGHT = 52.dp
 
-private val CELL_SHAPE = RoundedCornerShape(6.dp)
+/** 节与节之间的空隙（不按午休/晚休分段，行是连续的） */
+private val PERIOD_GAP = 2.dp
+
+/** 课程块圆角 */
+private val BLOCK_SHAPE = RoundedCornerShape(8.dp)
+
+/** 空格斑马纹圆角 */
+private val ZEBRA_SHAPE = RoundedCornerShape(6.dp)
 
 private val WEEKDAY_SHORT = listOf("一", "二", "三", "四", "五", "六", "日")
 
 private val TIGHT_PADDING = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+
+/**
+ * 课程块配色，与 [TimetableGrid.PALETTE_SIZE] 一一对应（下标来自课程名哈希）。
+ * 浅底 + 深字保证可读，左侧竖条用同系深色增强区分。
+ */
+private data class BlockColors(val container: Color, val onContainer: Color, val accent: Color)
+
+private val COURSE_COLORS = listOf(
+    BlockColors(Color(0xFFD7E3FF), Color(0xFF15366F), Color(0xFF4C66A8)), // 蓝
+    BlockColors(Color(0xFFFFDFC2), Color(0xFF5F3B00), Color(0xFFA05A00)), // 橙
+    BlockColors(Color(0xFFC9EFC9), Color(0xFF124A18), Color(0xFF2E7D32)), // 绿
+    BlockColors(Color(0xFFE9DDFF), Color(0xFF3F1D77), Color(0xFF6B4FA8)), // 紫
+    BlockColors(Color(0xFFBDEBE4), Color(0xFF0E4640), Color(0xFF00796B)), // 青
+    BlockColors(Color(0xFFFFD9E2), Color(0xFF6D1A38), Color(0xFFB0456A)), // 粉
+    BlockColors(Color(0xFFFFE59A), Color(0xFF57430A), Color(0xFF9A7B00)), // 黄
+    BlockColors(Color(0xFFFFDAD6), Color(0xFF6E352F), Color(0xFFB3554D)), // 红
+    BlockColors(Color(0xFFDDE1FF), Color(0xFF26337D), Color(0xFF5A66C4)), // 靛
+    BlockColors(Color(0xFFEFDCC3), Color(0xFF4E3114), Color(0xFF8D6E4B)), // 棕
+)
 
 @Composable
 fun TimetableScreen(viewModel: TimetableViewModel = viewModel()) {
@@ -100,7 +128,7 @@ fun TimetableScreen(viewModel: TimetableViewModel = viewModel()) {
 
             TimetableUiState.Phase.Ready -> {
                 val grid = state.grid
-                if (grid == null || grid.rows.isEmpty()) {
+                if (grid == null || grid.periodCount <= 0) {
                     CenterBox {
                         Text(
                             state.message.ifBlank { "这个学期没有课程。" },
@@ -194,14 +222,15 @@ private fun Header(
  * 数据形态异常时的显式提示。
  *
  * 这些课在界面上「看起来正常」，但位置或周次是错的——不提示的话用户永远发现不了。
+ * 新布局里缺星期/缺节次的课**排不进表格**（旧版还有兜底行），更要说出来。
  */
 @Composable
-private fun DataWarnings(grid: WeekGrid, anchorReliable: Boolean, anchorLine: String) {
+private fun DataWarnings(grid: LessonGrid, anchorReliable: Boolean, anchorLine: String) {
     val warnings = buildList {
         if (!anchorReliable && anchorLine.isNotBlank()) add(anchorLine)
         if (grid.unknownWeekCount > 0) add("有 ${grid.unknownWeekCount} 条课的周次文本没读懂，已按「每周都上」显示")
         if (grid.unplacedCount > 0) add("有 ${grid.unplacedCount} 条课缺少星期信息，排不进表格")
-        if (grid.rows.any { it.orderUnknown }) add("有课缺少节次号，行位置是兜底排的")
+        if (grid.periodUnknownCount > 0) add("有 ${grid.periodUnknownCount} 条课的节次没读懂，排不进表格")
     }
     if (warnings.isEmpty()) return
 
@@ -267,25 +296,29 @@ private fun weekRangeLabel(state: TimetableUiState): String {
 
 // ---------- 周课表 ----------
 
+/**
+ * 周课表：表头与节次轴固定，只有课程网格上下滚动——
+ * 滚动后「现在是第几节、今天周几」始终可见。
+ */
 @Composable
 private fun WeekTable(
-    grid: WeekGrid,
+    grid: LessonGrid,
     week: Int,
     todayWeek: Int,
     onPick: (List<CourseSlot>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val todayColumn = if (week == todayWeek) LocalDate.now().dayOfWeek.value else 0
+    val pitch = PERIOD_HEIGHT + PERIOD_GAP
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 6.dp),
     ) {
-        // 表头：行标题占位 + 星期一..日
+        // 表头（固定）：节次轴占位 + 星期一..日（周末也显示）
         Row(modifier = Modifier.fillMaxWidth()) {
-            Spacer(Modifier.width(ROW_LABEL_WIDTH))
+            Spacer(Modifier.width(AXIS_WIDTH))
             WEEKDAY_SHORT.forEachIndexed { index, label ->
                 val weekday = index + 1
                 Text(
@@ -305,146 +338,172 @@ private fun WeekTable(
             }
         }
 
-        grid.rows.forEachIndexed { rowIndex, row ->
-            Row(modifier = Modifier.fillMaxWidth()) {
-                RowLabel(row)
-                (1..7).forEach { weekday ->
-                    CourseCell(
-                        courses = grid.at(rowIndex, weekday),
-                        highlighted = weekday == todayColumn,
-                        onClick = onPick,
+        Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            // 节次轴（固定不滚）：1、2、3…逐节，上午/下午/晚上在段首竖排标注
+            Column(modifier = Modifier.width(AXIS_WIDTH)) {
+                repeat(grid.periodCount) { i ->
+                    PeriodAxisCell(
+                        number = i + 1,
+                        modifier = Modifier.height(if (i == grid.periodCount - 1) PERIOD_HEIGHT else pitch),
                     )
                 }
             }
-            Spacer(Modifier.height(3.dp))
-        }
 
-        Spacer(Modifier.height(16.dp))
+            // 课程网格（唯一滚动区）
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                (1..7).forEach { weekday ->
+                    DayColumn(
+                        blocks = grid.blocks(weekday),
+                        periodCount = grid.periodCount,
+                        onPick = onPick,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
 }
 
+/** 节次轴单格：数字 + 段首的「上午/下午/晚上」竖排小字 */
 @Composable
-private fun RowLabel(row: PeriodRow) {
-    // 「上午 3-4节」拆成两行分开渲染。
-    // 不能只靠 \n + 自动换行：窄屏下「1-2节」会被再折一次，变成三行的「上午/1-2/节」。
-    val cut = row.label.indexOf(' ')
-    val head = if (cut > 0) row.label.substring(0, cut) else row.label
-    val tail = if (cut > 0) row.label.substring(cut + 1) else ""
-    val labelColor = if (row.orderUnknown) {
-        MaterialTheme.colorScheme.error
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+private fun PeriodAxisCell(number: Int, modifier: Modifier = Modifier) {
+    // 分段标注按通用作息（1-4 上午 / 5-8 下午 / 9+ 晚上）。它只是装饰：
+    // 课块的真实位置由 Jieci 解析驱动，学校作息若变，这里顶多标注错，课不会画错位。
+    val seg = when (number) {
+        1 -> "上午"
+        5 -> "下午"
+        9 -> "晚上"
+        else -> null
     }
-
-    Column(
-        modifier = Modifier
-            .width(ROW_LABEL_WIDTH)
-            .heightIn(min = CELL_HEIGHT)
-            .padding(end = 2.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = head,
-            style = MaterialTheme.typography.labelSmall,
-            fontSize = 9.sp,
-            lineHeight = 11.sp,
-            textAlign = TextAlign.Center,
-            softWrap = tail.isEmpty(),
-            maxLines = if (tail.isEmpty()) 2 else 1,
-            overflow = TextOverflow.Ellipsis,
-            color = labelColor,
+            text = number.toString(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (tail.isNotEmpty()) {
+        seg?.let {
+            Spacer(Modifier.width(2.dp))
             Text(
-                text = tail,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 9.sp,
-                lineHeight = 11.sp,
-                textAlign = TextAlign.Center,
-                softWrap = false,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = labelColor,
-            )
-        }
-        if (row.allDay) {
-            Text(
-                "全天",
-                style = MaterialTheme.typography.labelSmall,
+                text = it.toCharArray().joinToString("\n"),
                 fontSize = 8.sp,
+                lineHeight = 9.sp,
                 color = MaterialTheme.colorScheme.outline,
+                textAlign = TextAlign.Center,
             )
         }
     }
 }
 
+/**
+ * 一天的列：斑马纹空格打底（行连续，不按午晚休分段），课块按节次绝对定位。
+ * 连堂课纵向合并：块高 = span × 单节高 + (span-1) × 间隙，与节次轴逐节对齐。
+ */
 @Composable
-private fun RowScope.CourseCell(
-    courses: List<CourseSlot>,
-    highlighted: Boolean,
-    onClick: (List<CourseSlot>) -> Unit,
+private fun DayColumn(
+    blocks: List<LessonBlock>,
+    periodCount: Int,
+    onPick: (List<CourseSlot>) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val empty = courses.isEmpty()
-    val stacked = courses.size > 1
-    val container = when {
-        empty && highlighted -> MaterialTheme.colorScheme.primary.copy(alpha = 0.07f)
-        empty -> Color.Transparent
-        stacked -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.primaryContainer
-    }
-    val onContainer = when {
-        empty -> MaterialTheme.colorScheme.onSurface
-        stacked -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onPrimaryContainer
-    }
-    // 空格子也要有够看得见的边框：alpha 太低时整张表会「散掉」，看不出行列结构。
-    // 今天那一列用主色描边 + 更实的底色，一眼能定位
-    val outline = if (highlighted) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.32f)
-    }
-
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .height(CELL_HEIGHT)
-            .padding(horizontal = 1.dp)
-            .background(container, CELL_SHAPE)
-            .border(if (highlighted) 1.5.dp else 1.dp, outline, CELL_SHAPE)
-            .clickable(enabled = !empty) { onClick(courses) }
-            .padding(horizontal = 3.dp, vertical = 4.dp),
-    ) {
-        if (empty) return@Box
-
+    Box(modifier = modifier.clip(ZEBRA_SHAPE)) {
         Column {
-            if (stacked) {
+            repeat(periodCount) { i ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (i == periodCount - 1) PERIOD_HEIGHT else PERIOD_HEIGHT + PERIOD_GAP)
+                        .padding(vertical = 1.dp)
+                        .background(
+                            if (i % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            else Color.Transparent,
+                            ZEBRA_SHAPE,
+                        ),
+                )
+            }
+        }
+
+        blocks.forEach { block ->
+            val y = (PERIOD_HEIGHT + PERIOD_GAP) * (block.from - 1)
+            val h = PERIOD_HEIGHT * block.span + PERIOD_GAP * (block.span - 1)
+            CourseBlock(
+                block = block,
+                onClick = { onPick(block.courses) },
+                modifier = Modifier
+                    .offset(y = y)
+                    .fillMaxWidth()
+                    .height(h),
+            )
+        }
+    }
+}
+
+/** 课程块：1×span 的彩色矩形，课程名哈希取色 —— 同一门课全表同色 */
+@Composable
+private fun CourseBlock(
+    block: LessonBlock,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val first = block.courses.first()
+    val colors = COURSE_COLORS[TimetableGrid.paletteIndexFor(first.courseName)]
+    val nameMaxLines = (block.span * 2).coerceAtMost(4)
+    val placeMaxLines = if (block.span >= 2) 2 else 1
+
+    Row(
+        modifier = modifier
+            .padding(all = 1.dp)
+            .clip(BLOCK_SHAPE)
+            .background(colors.container)
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .fillMaxHeight()
+                .background(colors.accent),
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 3.dp, vertical = 4.dp),
+        ) {
+            if (block.stacked) {
+                // 时间重叠的组：块上标门数，详情里全列
                 Text(
-                    "${courses.size} 门",
-                    style = MaterialTheme.typography.labelSmall,
+                    "${block.courses.size} 门",
                     fontSize = 8.sp,
                     fontWeight = FontWeight.Bold,
-                    color = onContainer,
+                    color = colors.onContainer,
                 )
             }
             Text(
-                courses.first().courseName,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 9.sp,
-                lineHeight = 11.sp,
-                maxLines = if (stacked) 3 else 4,
+                first.courseName,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = nameMaxLines,
                 overflow = TextOverflow.Ellipsis,
-                color = onContainer,
+                color = colors.onContainer,
             )
-            courses.first().place.takeIf { it.isNotBlank() && it != "未定" }?.let { place ->
+            first.place.takeIf { it.isNotBlank() && it != "未定" }?.let { place ->
                 Text(
                     "@$place",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 8.sp,
-                    maxLines = 2,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                    maxLines = placeMaxLines,
                     overflow = TextOverflow.Ellipsis,
-                    color = onContainer.copy(alpha = 0.75f),
+                    color = colors.onContainer.copy(alpha = 0.78f),
                 )
             }
         }
@@ -464,9 +523,9 @@ private fun CourseDetailSheet(courses: List<CourseSlot>, onDismiss: () -> Unit) 
                 .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
         ) {
             if (courses.size > 1) {
-                // 同一节次叠了多门课：全部列出来，不能只显示第一门就把后面的藏掉
+                // 同一时段叠了多门课：全部列出来，不能只显示第一门就把后面的藏掉
                 Text(
-                    "同一节次有 ${courses.size} 门课",
+                    "该时段有 ${courses.size} 门课",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )

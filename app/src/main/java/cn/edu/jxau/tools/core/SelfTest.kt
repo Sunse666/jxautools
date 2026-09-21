@@ -56,7 +56,7 @@ object SelfTest {
         report("RSA 密码加密", CasRsa.selfTest())
         report("周次解析", WeekParser.selfTest())
         report("教学周推算", WeekMath.selfTest())
-        report("课表行归纳", TimetableGrid.selfTest())
+        report("课表格子归纳", TimetableGrid.selfTest())
         report("成绩统计口径", GradeStats.selfTest())
         report("选课容量与汇总口径", CourseClass.selfTest())
         report("会话失效判定", SessionValidation.selfTest())
