@@ -5,11 +5,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
+import cn.edu.jxau.tools.data.fetchWithHeal
 import cn.edu.jxau.tools.data.model.GradeItem
 import cn.edu.jxau.tools.data.model.GradeStats
 import cn.edu.jxau.tools.data.model.GradeSummary
-import cn.edu.jxau.tools.data.net.JwglApi
-import cn.edu.jxau.tools.data.net.SiteProfiles
+import cn.edu.jxau.tools.data.userMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -67,20 +67,21 @@ class GradeViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _state.update { it.copy(phase = GradeUiState.Phase.Loading, message = "正在读取成绩…") }
-            val profile = SiteProfiles.of(session.channel)
-            val api = JwglApi(profile, session.uuid, session.cookie)
 
-            val grades = api.fetchGrades()
-            if (grades == null) {
-                JxauLog.e("成绩读取失败")
+            // 走 repo.fetchWithHeal：先确保会话健康，服务端判定会话失效时续期后重试一次。
+            // 冷启动时这一步通常就是把过期 Cookie 换成新会话的那一下。
+            val outcome = repo.fetchWithHeal { it.fetchGrades() }
+            if (!outcome.ok) {
+                JxauLog.e("成绩读取失败：${outcome.failure}")
                 _state.update {
                     it.copy(
                         phase = GradeUiState.Phase.Failed,
-                        message = "成绩接口没有返回可解析的数据。多半是会话已失效，可到「我的」页续期或重新登录。",
+                        message = outcome.failure.userMessage("成绩"),
                     )
                 }
                 return@launch
             }
+            val grades = outcome.value.orEmpty()
 
             val summary = GradeStats.summarize(grades)
             JxauLog.i(

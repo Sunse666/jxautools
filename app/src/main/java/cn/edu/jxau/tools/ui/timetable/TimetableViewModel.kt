@@ -5,13 +5,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
+import cn.edu.jxau.tools.data.fetchWithHeal
 import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.Term
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.WeekGrid
 import cn.edu.jxau.tools.data.model.WeekMath
-import cn.edu.jxau.tools.data.net.JwglApi
-import cn.edu.jxau.tools.data.net.SiteProfiles
+import cn.edu.jxau.tools.data.userMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -80,15 +80,17 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             _state.update { it.copy(phase = TimetableUiState.Phase.Loading, message = "正在读取课表…") }
-            val profile = SiteProfiles.of(session.channel)
-            val api = JwglApi(profile, session.uuid, session.cookie)
-            JxauLog.i("课表加载开始：通道=${profile.label} uuid=${session.uuid.take(8)}…")
+            JxauLog.i("课表加载开始：通道=${repo.currentChannel().label} uuid=${session.uuid.take(8)}…")
 
-            val terms = api.fetchTerms()
-            if (terms == null) {
-                fail("学期列表读取失败。可能是会话已失效或网络不通——可到「我的」页续期或重新登录。")
+            // 三个请求都走 repo.fetchWithHeal：内部先确保会话健康（冷启动时通常就是它
+            // 把过期的 Cookie 换成新会话），服务端若判定会话失效则续期后重试一次。
+            // 第一次调用会真的校验会话，后两次落在 60s 节流窗口里，不会重复打 /Main/Index。
+            val termsOutcome = repo.fetchWithHeal { it.fetchTerms() }
+            if (!termsOutcome.ok) {
+                fail(termsOutcome.failure.userMessage("学期列表"))
                 return@launch
             }
+            val terms = termsOutcome.value.orEmpty()
             if (terms.isEmpty()) {
                 fail("服务端没有返回任何学期，无法确定要查哪个学期的课表。")
                 return@launch
@@ -98,17 +100,22 @@ class TimetableViewModel(application: Application) : AndroidViewModel(applicatio
             val term = terms.firstOrNull { it.code == keep } ?: terms.first()
             JxauLog.i("当前学期：${term.code}（共 ${terms.size} 个学期可选）")
 
-            val slots = api.fetchTimetable(term.code)
-            if (slots == null) {
-                fail("课表接口没有返回可解析的数据。多半是会话已失效，可到「我的」页续期或重新登录。")
+            val slotsOutcome = repo.fetchWithHeal { it.fetchTimetable(term.code) }
+            if (!slotsOutcome.ok) {
+                fail(slotsOutcome.failure.userMessage("课表"))
                 return@launch
             }
+            val slots = slotsOutcome.value.orEmpty()
             JxauLog.i("课表读取成功：${slots.size} 条")
 
             // 考试安排只为反推开学日期，拿不到不算失败 —— 退化成「周次需手选」
-            val exams = api.fetchExams(term.code)
+            val examsOutcome = repo.fetchWithHeal { it.fetchExams(term.code) }
+            val exams = examsOutcome.value
             if (exams == null) {
-                JxauLog.w("考试安排读取失败，无法推算开学日期，周次将退回第 1 周待用户手选")
+                JxauLog.w(
+                    "考试安排读取失败（${examsOutcome.failure}），无法推算开学日期，" +
+                        "周次将退回第 1 周待用户手选"
+                )
             }
             val anchor = exams?.let { WeekMath.anchorFromExams(it) }
 

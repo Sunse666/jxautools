@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.text.SimpleDateFormat
@@ -48,6 +50,32 @@ class SessionRepository private constructor(private val store: SessionStore) {
     val hasTgtFlow: StateFlow<Boolean> = _hasTgt.asStateFlow()
 
     private var keepaliveJob: Job? = null
+
+    /**
+     * 校验 / 续期的互斥锁。
+     *
+     * ## 为什么必须有
+     * 2026-09-21 实测（给会话下毒后冷启动）：保活的首次校验和数据页的
+     * [ensureHealthy] 同时发现会话失效，于是**各换了一次 ST**，
+     * 拿到两个不同的 uuid 会话（日志里 `dac35c5a` 与 `0f352e25` 交替出现）。
+     *
+     * 危害不只是白跑一趟：两个会话里只有一个会被 [adopt] 留下，
+     * 另一个变成服务端侧的悬挂会话；更糟的是**「当前用哪个」取决于谁后写**，
+     * 调用方可能拿着已经被覆盖掉的 uuid 去发写操作。
+     *
+     * 加锁之后第二个调用者会等到第一个续期完成，此时它自己的校验用的是新 Cookie，
+     * 直接通过、不再续期。注意 `kotlinx.coroutines.sync.Mutex` **不可重入**，
+     * 所以内部统一走私有方法 [renewFromTgtLocked]，公开入口各自加锁，不嵌套。
+     */
+    private val healLock = Mutex()
+
+    /**
+     * 上次真正打过 `/Main/Index` 校验的时刻。
+     *
+     * 存在的意义是给 [ensureHealthy] 做节流：各个数据页每次加载都会调它，
+     * 没有节流就等于每翻一次页都多拉一个整页 HTML。
+     */
+    private var lastValidatedAt = 0L
 
     init {
         // 冷启动时把本地会话的 Cookie 同步给探测类工具（重启后 jar 是空的）
@@ -127,16 +155,8 @@ class SessionRepository private constructor(private val store: SessionStore) {
 
                 Http.noRedirectClient.newCall(builder.build()).execute().use { response ->
                     val location = response.header("Location").orEmpty()
-                    val lowerLocation = location.lowercase()
                     val body = response.body?.string().orEmpty()
                     val rotatedCookie = Http.cookieJar.headerForHost(profile.sessionHost)
-
-                    val redirectedToLogin = response.code in listOf(301, 302, 303, 307, 308) &&
-                        if (profile.channel == Channel.WEBVPN) {
-                            lowerLocation.contains("login")
-                        } else {
-                            lowerLocation.contains("login") || lowerLocation.contains("cas")
-                        }
 
                     /**
                      * ⚠️ 这里**故意不含** "用户登录"。
@@ -146,36 +166,23 @@ class SessionRepository private constructor(private val store: SessionStore) {
                      * 于是 "用户登录" 被命中，导致「刚登录成功就被判会话失效」的假阴性。
                      *
                      * Python 脚本的 invalid_markers 里含这一条，同样会误判——这是脚本的一个真实缺陷，
-                     * 安卓侧不再沿用。失效判定改由「302 跳登录页」和正向证据共同承担。
+                     * 安卓侧不再沿用。
                      */
-                    val invalidMarkers = listOf("登录信息丢失", "统一身份认证平台", "cas/login")
-                    val hitMarker = invalidMarkers.firstOrNull { body.contains(it) }
-                    // 正向证据：页面正文里带着本次会话的 uuid（主页面的菜单 URL 全用它拼路径）。
-                    // 比"没命中失效词"强得多——它是"确实拿到了主页面"的正面证明。
-                    val uuidInBody = uuid.isNotBlank() && body.contains(uuid)
+                    // 判定顺序（失效标记优先于「正文含 uuid」）与理由见 SessionValidation 的文档，
+                    // 那里有真实失效页做自检向量。这里只负责取数据、翻译结论。
+                    val verdict = SessionValidation.classify(
+                        code = response.code,
+                        location = location,
+                        body = body,
+                        uuid = uuid,
+                        webvpn = profile.channel == Channel.WEBVPN,
+                    )
 
-                    when {
-                        redirectedToLogin -> ValidateOutcome(
-                            valid = false,
-                            cookie = rotatedCookie,
-                            detail = "HTTP ${response.code} → ${location.take(80)}",
-                        )
-                        uuidInBody -> ValidateOutcome(
-                            valid = true,
-                            cookie = rotatedCookie,
-                            detail = "HTTP ${response.code}，正文含本次 uuid（${body.length} 字符）",
-                        )
-                        hitMarker != null -> ValidateOutcome(
-                            valid = false,
-                            cookie = rotatedCookie,
-                            detail = "正文命中失效标记「$hitMarker」",
-                        )
-                        else -> ValidateOutcome(
-                            valid = true,
-                            cookie = rotatedCookie,
-                            detail = "HTTP ${response.code}，正文 ${body.length} 字符（未含 uuid，形态未识别）",
-                        )
-                    }
+                    ValidateOutcome(
+                        valid = verdict.valid,
+                        cookie = rotatedCookie,
+                        detail = verdict.detail,
+                    )
                 }
             } catch (e: Exception) {
                 ValidateOutcome(valid = false, cookie = "", detail = "校验请求异常：${e.message}")
@@ -187,8 +194,15 @@ class SessionRepository private constructor(private val store: SessionStore) {
      *
      * TGT 的取用顺序：当前会话里的 → 本地待用 TGT。后者让"兑换失败"或"会话被清掉"之后
      * 仍能免验证码恢复登录态。
+     *
+     * 走 [healLock] 串行化：换 ST 是有服务端副作用的操作（每个 ST 换出一个新会话），
+     * 并发调用会造出多个会话来。
      */
-    suspend fun refreshFromTgt(profile: SiteProfile): JxauSession? {
+    suspend fun refreshFromTgt(profile: SiteProfile): JxauSession? =
+        healLock.withLock { renewFromTgtLocked(profile) }
+
+    /** [refreshFromTgt] 的实际实现。**必须在持有 [healLock] 时调用** */
+    private suspend fun renewFromTgtLocked(profile: SiteProfile): JxauSession? {
         val current = _session.value
         val tgt = current?.tgt?.ifBlank { store.pendingTgt } ?: store.pendingTgt
         if (tgt.isBlank()) {
@@ -226,6 +240,16 @@ class SessionRepository private constructor(private val store: SessionStore) {
      *
      * 每次心跳做两件事：刷新会话有效期 + 校验是否失效；失效则立刻尝试 TGT 续期，
      * 续期也失败才提示用户重新登录。
+     *
+     * ## ⚠️ 第一次校验是**立刻**的，不是在 `delay` 之后
+     * 早先的版本是 `while { delay(240_000); 校验() }`，于是冷启动后的整整 4 分钟内
+     * 谁都不会去校验——而首页恰恰在这个窗口里发请求，拿到失效页面后只能干瞪眼，
+     * 提示用户「去『我的』页续期」。也就是**用户每天早上的第一次打开必然是失败的**，
+     * 得手动点一下才能用。这跟「一次登录长期可用」是反的。
+     *
+     * 现在改成「先校验，再等待」：冷启动就会立刻把过期会话换掉。
+     * 不能只靠这个：请求并发在跑，首次校验和首页请求会撞车，
+     * 所以数据层自己也会在失败后按需续期（见 [ensureHealthy]）。
      */
     fun startKeepalive(
         scope: CoroutineScope,
@@ -239,36 +263,67 @@ class SessionRepository private constructor(private val store: SessionStore) {
         _keepaliveRunning.value = true
         JxauLog.i("已开启登录保活：每 ${intervalSeconds}s 刷新一次会话")
         keepaliveJob = scope.launch {
+            // 冷启动的第一跳不放 delay：会话多半已经过期，越早换掉越好
             while (isActive) {
+                ensureHealthy(profileProvider(), force = true)
                 delay(intervalSeconds * 1000L)
-                val current = _session.value
-                if (current == null) {
-                    JxauLog.w("保活跳过：当前无会话")
-                    continue
-                }
-                val profile = profileProvider()
-                val outcome = validate(current, profile)
-                val base = current.copy(
-                    cookie = outcome.cookie.ifBlank { current.cookie },
-                    savedAt = System.currentTimeMillis(),
-                )
-                if (outcome.cookie.isNotBlank()) adopt(base)
-                if (outcome.valid) {
-                    _lastCheckText.value = "${stamp()} 保活正常"
-                    JxauLog.i("保活 OK（${outcome.detail}）")
-                } else {
-                    JxauLog.w("保活发现会话失效：${outcome.detail}，尝试 TGT 续期")
-                    val renewed = refreshFromTgt(profile)
-                    if (renewed != null) {
-                        _lastCheckText.value = "${stamp()} 已静默续期"
-                    } else {
-                        _lastCheckText.value = "${stamp()} 会话失效，需重新登录"
-                        JxauLog.e("保活失败且续期不成功，需要用户重新登录")
-                    }
-                }
             }
         }
     }
+
+    /**
+     * 让会话变健康：**校验 → 失效就 TGT 静默续期**。
+     *
+     * 这是「一次登录长期可用」真正落地的地方。保活心跳和各个数据页都调它，
+     * 区别只在 [force]：
+     * - 数据页每次都调，但**默认走节流**（[MIN_VALIDATE_INTERVAL] 内直接返回），
+     *   所以正常使用时几乎不产生额外请求。
+     * - 确认请求已经失败之后（`JwglApi.sessionExpired`）传 `force = true`，
+     *   跳过节流立刻续期，不然会拿同一份过期 Cookie 再撞一次。
+     *
+     * @return 可用的会话；`null` 表示确实救不回来（没 TGT，或续期也失败），必须重新登录
+     */
+    suspend fun ensureHealthy(profile: SiteProfile, force: Boolean = false): JxauSession? =
+        healLock.withLock {
+            val current = _session.value ?: return@withLock null
+            if (!current.isUsable && current.tgt.isBlank()) {
+                _lastCheckText.value = "未登录"
+                return@withLock null
+            }
+
+            val now = System.currentTimeMillis()
+            if (!force && now - lastValidatedAt < MIN_VALIDATE_INTERVAL) {
+                // 刚校验过，不重复打 /Main/Index（那是个整页 HTML，不便宜）。
+                // 注意这一句在锁内：并发调用时后到的那个正好靠它避免重复续期。
+                return@withLock current
+            }
+
+            val outcome = validate(current, profile)
+            lastValidatedAt = System.currentTimeMillis()
+
+            val refreshed = current.copy(
+                cookie = outcome.cookie.ifBlank { current.cookie },
+                savedAt = System.currentTimeMillis(),
+            )
+            if (outcome.cookie.isNotBlank()) adopt(refreshed)
+
+            if (outcome.valid) {
+                _lastCheckText.value = "${stamp()} 会话正常"
+                JxauLog.i("会话正常（${outcome.detail}）")
+                return@withLock _session.value
+            }
+
+            JxauLog.w("会话校验未通过：${outcome.detail}，尝试 TGT 续期")
+            val renewed = renewFromTgtLocked(profile)
+            if (renewed != null) {
+                _lastCheckText.value = "${stamp()} 已静默续期"
+                lastValidatedAt = System.currentTimeMillis()
+            } else {
+                _lastCheckText.value = "${stamp()} 会话失效，需重新登录"
+                JxauLog.e("续期不成功，需要用户重新登录")
+            }
+            renewed
+        }
 
     fun stopKeepalive() {
         if (keepaliveJob?.isActive == true) {
@@ -280,6 +335,13 @@ class SessionRepository private constructor(private val store: SessionStore) {
     }
 
     companion object {
+        /**
+         * [ensureHealthy] 的节流窗口。取 60 秒：
+         * 比保活心跳（240s）短，所以保活仍然是主要的校验者；
+         * 又比「切一次 Tab」长得多，正常浏览不会因此多出请求。
+         */
+        private const val MIN_VALIDATE_INTERVAL = 60_000L
+
         @Volatile
         private var shared: SessionRepository? = null
 
