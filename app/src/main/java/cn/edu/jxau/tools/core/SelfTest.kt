@@ -3,6 +3,7 @@ package cn.edu.jxau.tools.core
 import cn.edu.jxau.tools.data.SessionValidation
 import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.GradeStats
+import cn.edu.jxau.tools.data.model.RushPolicy
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
@@ -59,6 +60,7 @@ object SelfTest {
         report("成绩统计口径", GradeStats.selfTest())
         report("选课容量与汇总口径", CourseClass.selfTest())
         report("会话失效判定", SessionValidation.selfTest())
+        report("抢课回执决策", RushPolicy.selfTest())
         JxauLog.i("=== 全部自检：$passed/$total 通过 ===")
         return passed to total
     }

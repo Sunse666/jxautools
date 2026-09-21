@@ -61,6 +61,11 @@
   只能用运行时 `Json.parseToJsonElement`；`okhttp-urlconnection` 未缓存 → CookieJar 自建。
 - MuMu 模拟器：`adb connect 127.0.0.1:7555`，屏幕 900x1600 / density 320（450x800dp）。
   **每次 Bash 调用 adb daemon 都会重启 → `connect` 与命令必须放在同一次调用里**，并带 `-s 127.0.0.1:7555`。
+  MuMu 本体在 `D:\tools\MuMu`，启动：`D:/tools/MuMu/nx_main/MuMuManager.exe control -v 0 launch`（要等约 1 分钟才可 adb 连）。
+- **模拟器访问宿主机用 `10.0.2.2`**（NAT 网关），不要用 `adb reverse`——daemon 每次重连就清掉映射，
+  演练跑到一半断连极难排查。mock 演练（`tools/mock_jwgl.py`，详见接口清单第 9 节）就用 10.0.2.2:8765。
+- **会话切换必须与会话自愈串行**：enterMockMode/exitMockMode 拿 healLock；续期完成时若
+  会话已被切换（引用不等）结果作废。实测在途续期晚到把 mock 会话踩回真实会话，演练静默失效。
 - 调试包可 `adb shell run-as cn.edu.jxau.tools cat /data/data/cn.edu.jxau.tools/shared_prefs/jxau_session.xml`
   直接取会话 → 这是把接口探测从「端上重编」搬到「本机 Python」的关键（`tools/probe_pages.py`）。
 - 构建全程命令行 Gradle，**不用 Android Studio**。

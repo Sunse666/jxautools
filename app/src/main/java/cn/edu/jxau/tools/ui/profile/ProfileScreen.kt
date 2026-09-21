@@ -82,6 +82,28 @@ fun ProfileScreen(viewModel: ProfileViewModel = viewModel()) {
             }
         }
 
+        SectionCard("本地演练（抢课）") {
+            val mockActive = session?.channel == cn.edu.jxau.tools.data.model.Channel.MOCK
+            Text(
+                if (mockActive) "演练模式中：所有请求打向本机 mock 服务端（127.0.0.1:8765），真实会话已备份。"
+                else "演练模式会把请求切到本机 mock 教务服务端（tools/mock_jwgl.py），" +
+                    "用于在选课窗口外验证抢课引擎。真实会话会先备份，退出即恢复。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.enterMock() },
+                    enabled = !mockActive,
+                ) { Text("进入演练") }
+                OutlinedButton(
+                    onClick = { viewModel.exitMock() },
+                    enabled = mockActive,
+                ) { Text("退出演练") }
+            }
+        }
+
         SectionCard("诊断") {
             Text(
                 "纯逻辑自检（密码加密、周次解析、教学周推算、课表行归纳）会在每次启动时自动跑一遍，" +

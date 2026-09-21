@@ -1,0 +1,18 @@
+{
+  "seed_enrolled": ["MOCK9001"],
+  "open_batches": 1,
+  "tree": [{"id": "任选", "text": "公共选修"}],
+  "rules": [
+    {"classNo": "MOCK0001", "mode": "capacity", "fail_times": 3, "fail_message": "该教学班人数已满，请选择其他班级"},
+    {"classNo": "MOCK0002", "mode": "ambiguous", "fail_times": 2},
+    {"classNo": "MOCK0003", "mode": "ok", "fail_times": 0},
+    {"classNo": "MOCK0004", "mode": "expire", "fail_times": 2}
+  ],
+  "catalog": [
+    {"JxbBh": "MOCK0001", "Jxb": "高级人工智能A班", "Kclb": "公共选修课", "RkLs": "模拟教师甲", "Zxf": 2.0, "Xklb": "任选", "SkRs": 60, "MaxRs": 60, "Xkrl": 0, "Sksj": " 星期二 晚上 9-11节", "XkZt": 0, "Xkpc": 186, "Kkdw": "计算机与信息工程学院", "Xkyq": "演练：前3次名额满"},
+    {"JxbBh": "MOCK0002", "Jxb": "区块链技术导论", "Kclb": "公共选修课", "RkLs": "模拟教师乙", "Zxf": 2.0, "Xklb": "任选", "SkRs": 55, "MaxRs": 60, "Xkrl": 5, "Sksj": " 星期三 下午 5-7节", "XkZt": 0, "Xkpc": 186, "Kkdw": "计算机与信息工程学院", "Xkyq": "演练：前2次回执不明"},
+    {"JxbBh": "MOCK0003", "Jxb": "Python程序设计", "Kclb": "公共选修课", "RkLs": "模拟教师丙", "Zxf": 2.5, "Xklb": "任选", "SkRs": 30, "MaxRs": 60, "Xkrl": 30, "Sksj": " 星期四 晚上 9-11节", "XkZt": 0, "Xkpc": 186, "Kkdw": "计算机与信息工程学院", "Xkyq": "演练：一次成功"},
+    {"JxbBh": "MOCK0004", "Jxb": "数据挖掘基础", "Kclb": "公共选修课", "RkLs": "模拟教师丁", "Zxf": 2.5, "Xklb": "任选", "SkRs": 10, "MaxRs": 60, "Xkrl": 50, "Sksj": " 星期五 下午 5-6节", "XkZt": 0, "Xkpc": 186, "Kkdw": "计算机与信息工程学院", "Xkyq": "演练：前2次会话失效页"},
+    {"JxbBh": "MOCK9001", "Jxb": "影视鉴赏（已选种子）", "Kclb": "公共选修课", "RkLs": "模拟教师戊", "Zxf": 1.5, "Xklb": "任选", "SkRs": 60, "MaxRs": 60, "Xkrl": 0, "Sksj": " 星期一 晚上 9-11节", "XkZt": 1, "Xkpc": 186, "Kkdw": "艺术学院", "Xkyq": ""}
+  ]
+}

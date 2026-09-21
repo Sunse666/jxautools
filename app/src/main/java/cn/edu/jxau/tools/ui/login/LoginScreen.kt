@@ -176,7 +176,8 @@ private fun ChannelCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Channel.entries.forEach { channel ->
+            // MOCK 是「我的」页演练开关的专用通道，不作为登录选项出现
+            Channel.entries.filter { it != Channel.MOCK }.forEach { channel ->
                 Row(
                     modifier = Modifier
                         .weight(1f)

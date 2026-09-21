@@ -44,7 +44,11 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
             val outcome = repo.validate(session, profile)
             JxauLog.i("手动校验：${if (outcome.valid) "有效" else "无效"}（${outcome.detail}）")
             if (outcome.valid && outcome.cookie.isNotBlank()) {
-                repo.adopt(session.copy(cookie = outcome.cookie, savedAt = System.currentTimeMillis()))
+                // 校验走了一次网络往返，期间会话可能已被换掉（切演练/退出登录/后台续期），
+                // 只允许把新 Cookie 写回「还是原来那个会话」的时候
+                if (repo.session.value === session) {
+                    repo.adopt(session.copy(cookie = outcome.cookie, savedAt = System.currentTimeMillis()))
+                }
             }
         }
     }
@@ -57,5 +61,20 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     fun logout() {
         JxauLog.i("用户主动退出登录")
         repo.clear()
+    }
+
+    // ---------- 本地演练（Mock）模式 ----------
+
+    /** 是否处于演练模式 */
+    fun isMockActive(): Boolean = repo.isMockActive()
+
+    /** 进入演练：备份真实会话，切到 mock 通道（需要本机跑着 tools/mock_jwgl.py） */
+    fun enterMock() {
+        viewModelScope.launch { repo.enterMockMode() }
+    }
+
+    /** 退出演练：恢复真实会话 */
+    fun exitMock() {
+        viewModelScope.launch { repo.exitMockMode() }
     }
 }

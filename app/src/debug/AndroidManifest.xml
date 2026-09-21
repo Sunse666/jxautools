@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 仅 debug 包生效：本地演练通道（Mock 服务端）走 http://127.0.0.1:8765，需要明文流量。
+     release 包不带这份 overlay，保持默认禁止明文。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true" />
+</manifest>

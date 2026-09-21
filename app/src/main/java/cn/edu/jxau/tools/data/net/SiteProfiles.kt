@@ -99,8 +99,36 @@ object SiteProfiles {
         note = "CAS 路径为反推，未经实测；失败请查看日志",
     )
 
+    /**
+     * 本地演练通道。指向 `tools/mock_jwgl.py`。
+     *
+     * 地址用 `10.0.2.2:8765`（MuMu/AVD 的 NAT 网关 = 开发机本机），**不依赖 `adb reverse`**——
+     * 实测 reverse 会在 adb daemon 每次重连时被清掉，演练跑到一半断连极难排查。
+     *
+     * **只用于抢课引擎演练**：不经过真实 CAS（会话由 [SessionRepository.enterMockMode] 直接灌入，
+     * TGT 是 mock 服务端认的假票据，expire 场景的「TGT→ST→新会话」自愈链路可以完整演练）。
+     */
+    val MOCK = SiteProfile(
+        channel = Channel.MOCK,
+        label = "本地演练（Mock 服务端）",
+        casLoginUrl = "http://10.0.2.2:8765/mock-cas/login",
+        casKaptchaUrl = "http://10.0.2.2:8765/mock-cas/kaptcha",
+        casTicketsUrl = "http://10.0.2.2:8765/mock-cas/v1/tickets",
+        serviceForLogin = "http://10.0.2.2:8765/mock-service",
+        tgtToStUrlTemplate = "http://10.0.2.2:8765/mock-cas/v1/tickets/{TGT}",
+        stService = "http://10.0.2.2:8765/mock-service",
+        stRedeemUrlTemplate = "http://10.0.2.2:8765/mock-service?ticket={ST}",
+        mainIndexUrlTemplate = "http://10.0.2.2:8765/Main/Index/{UUID}",
+        sessionCookieName = "ASP.NET_SessionId",
+        sessionHost = "10.0.2.2",
+        apiBase = "http://10.0.2.2:8765",
+        protocolLoginVerified = true,
+        note = "本地 mock；模拟器内 127.0.0.1 经 adb reverse 映射到开发机",
+    )
+
     fun of(channel: Channel): SiteProfile = when (channel) {
         Channel.WEBVPN -> WEBVPN
+        Channel.MOCK -> MOCK
         else -> DIRECT
     }
 
@@ -128,6 +156,7 @@ object SiteProfiles {
     fun resolve(choice: Channel): Channel = when (choice) {
         Channel.DIRECT -> Channel.DIRECT
         Channel.WEBVPN -> Channel.WEBVPN
+        Channel.MOCK -> Channel.MOCK
         Channel.AUTO -> {
             if (probeDirectReachable()) Channel.DIRECT else Channel.WEBVPN
         }

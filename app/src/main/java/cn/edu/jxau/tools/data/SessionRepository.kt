@@ -128,6 +128,56 @@ class SessionRepository private constructor(private val store: SessionStore) {
         _lastCheckText.value = "未登录"
     }
 
+    // ---------- 演练（Mock）模式 ----------
+
+    /** 当前是否处于演练模式（会话通道为 MOCK） */
+    fun isMockActive(): Boolean = _session.value?.channel == Channel.MOCK
+
+    /**
+     * 进入演练模式：备份真实会话，灌入 mock 会话。
+     *
+     * 拿 [healLock] 串行化：在途的校验/续期（保活第一跳可能挂着几十秒）完成前
+     * 不许切会话，否则切完会被陈旧的续期结果踩回去——2026-09-21 实测踩过。
+     *
+     * mock 会话带一个假 TGT（`MOCK-TGT-0001`，mock 服务端认它）——这不是多余：
+     * expire 场景里写接口返回会话失效页，引擎要走「TGT→ST→新会话」自愈后再重试，
+     * 这正是演练要覆盖的核心链路。真通道的 TGT 与此无关，已提前备份。
+     */
+    suspend fun enterMockMode() = healLock.withLock {
+        _session.value?.let { store.backupSessionForMock(it) }
+        store.pendingTgt = ""
+        adopt(
+            JxauSession(
+                channel = Channel.MOCK,
+                uuid = MOCK_UUID,
+                cookie = "ASP.NET_SessionId=$MOCK_COOKIE",
+                tgt = MOCK_TGT,
+                account = "mock",
+            )
+        )
+        _lastCheckText.value = "演练模式（Mock 服务端）"
+    }
+
+    /**
+     * 退出演练模式：恢复真实会话（没登录过就回到未登录）。
+     * 同样拿 [healLock]——理由同 [enterMockMode]。
+     */
+    suspend fun exitMockMode() = healLock.withLock {
+        val restored = store.restoreBackupAfterMock()
+        Http.resetCookies()
+        SessionCookieHolder.clear()
+        if (restored == null) {
+            store.clearSession()
+            _session.value = null
+            _hasTgt.value = false
+            _lastCheckText.value = "未登录"
+            JxauLog.i("已退出演练模式（无真实会话可恢复）")
+        } else {
+            adopt(restored)
+            _lastCheckText.value = "已退出演练模式"
+        }
+    }
+
     /**
      * 校验会话是否仍然有效。对应脚本 `_validate_saved_session`。
      *
@@ -219,6 +269,19 @@ class SessionRepository private constructor(private val store: SessionStore) {
         return try {
             JxauLog.i("尝试用 TGT 静默续期（免登录）…")
             val redeemed = CasAuth(profile).redeemSession(tgt = tgt)
+            // 陈旧续期防护：redeemSession 要走一整条网络链（可能十几秒），
+            // 期间 _session 可能已被换掉——典型是用户切了演练模式或退出登录。
+            // 这时本次续期是为一个已经不存在的会话做的，结果**作废**，不许覆盖当前会话。
+            // 实测教训（2026-09-21）：保活第一跳的续期晚到，把 mock 会话踩回真实会话，
+            // 整个演练静默失效，界面还显示「演练模式」。
+            val latest = _session.value
+            if (latest != null && latest !== current) {
+                JxauLog.w(
+                    "续期完成时会话已切换（现为 ${latest.channel.label}），" +
+                        "放弃为旧会话（${current?.channel?.label}）续出的结果"
+                )
+                return latest.takeIf { it.isUsable }
+            }
             adopt(
                 base.copy(
                     uuid = redeemed.uuid,
@@ -341,6 +404,13 @@ class SessionRepository private constructor(private val store: SessionStore) {
          * 又比「切一次 Tab」长得多，正常浏览不会因此多出请求。
          */
         private const val MIN_VALIDATE_INTERVAL = 60_000L
+
+        /** mock 会话的固定凭据，与 tools/mock_jwgl.py 里的约定一致（标准 UUID 形态，CasAuth 正则认） */
+        const val MOCK_UUID = "00000000-0000-4000-8000-000000000001"
+        const val MOCK_COOKIE = "mocksession123"
+
+        /** mock 的 TGT：给了它，expire 场景的「TGT→ST→新会话」自愈链路才能在演练里完整走通 */
+        const val MOCK_TGT = "MOCK-TGT-0001"
 
         @Volatile
         private var shared: SessionRepository? = null

@@ -58,6 +58,53 @@ class SessionStore(context: Context) {
         JxauLog.i("已清除本地会话")
     }
 
+    // ---------- 演练（Mock）会话的备份与恢复 ----------
+
+    /**
+     * 进入演练前把真实会话存到独立键位（不覆盖主键位）。
+     * 主键位随后会被 mock 会话占用；退出演练时恢复回来。
+     */
+    fun backupSessionForMock(session: JxauSession) {
+        prefs.edit()
+            .putString(KEY_MOCK_BACKUP_UUID, session.uuid)
+            .putString(KEY_MOCK_BACKUP_COOKIE, session.cookie)
+            .putString(KEY_MOCK_BACKUP_TGT, session.tgt)
+            .putString(KEY_MOCK_BACKUP_CHANNEL, session.channel.name)
+            .putString(KEY_MOCK_BACKUP_ACCOUNT, session.account)
+            .putLong(KEY_MOCK_BACKUP_SAVED_AT, session.savedAt)
+            .apply()
+        JxauLog.i("真实会话已备份，进入演练模式")
+    }
+
+    /** 恢复演练前的真实会话；没有备份（本来就没登录）返回 null */
+    fun restoreBackupAfterMock(): JxauSession? {
+        val uuid = prefs.getString(KEY_MOCK_BACKUP_UUID, null).orEmpty()
+        val cookie = prefs.getString(KEY_MOCK_BACKUP_COOKIE, null).orEmpty()
+        val channel = runCatching {
+            Channel.valueOf(prefs.getString(KEY_MOCK_BACKUP_CHANNEL, null) ?: Channel.DIRECT.name)
+        }.getOrDefault(Channel.DIRECT)
+        val tgt = prefs.getString(KEY_MOCK_BACKUP_TGT, null).orEmpty()
+        val account = prefs.getString(KEY_MOCK_BACKUP_ACCOUNT, null).orEmpty()
+        val savedAt = prefs.getLong(KEY_MOCK_BACKUP_SAVED_AT, 0L)
+        clearMockBackup()
+        if (uuid.isBlank() || cookie.isBlank()) return null
+        return JxauSession(
+            channel = channel, uuid = uuid, cookie = cookie,
+            tgt = tgt, account = account, savedAt = savedAt,
+        )
+    }
+
+    fun clearMockBackup() {
+        prefs.edit()
+            .remove(KEY_MOCK_BACKUP_UUID)
+            .remove(KEY_MOCK_BACKUP_COOKIE)
+            .remove(KEY_MOCK_BACKUP_TGT)
+            .remove(KEY_MOCK_BACKUP_CHANNEL)
+            .remove(KEY_MOCK_BACKUP_ACCOUNT)
+            .remove(KEY_MOCK_BACKUP_SAVED_AT)
+            .apply()
+    }
+
     /**
      * 待用 TGT：CAS 登录成功但会话兑换失败时留下的"半个成果"。
      *
@@ -124,6 +171,12 @@ class SessionStore(context: Context) {
         const val KEY_EFFECTIVE_CHANNEL = "effective_channel"
         const val KEY_SAVED_AT = "saved_at"
         const val KEY_PENDING_TGT = "pending_tgt"
+        const val KEY_MOCK_BACKUP_UUID = "mock_backup_uuid"
+        const val KEY_MOCK_BACKUP_COOKIE = "mock_backup_cookie"
+        const val KEY_MOCK_BACKUP_TGT = "mock_backup_tgt"
+        const val KEY_MOCK_BACKUP_CHANNEL = "mock_backup_channel"
+        const val KEY_MOCK_BACKUP_ACCOUNT = "mock_backup_account"
+        const val KEY_MOCK_BACKUP_SAVED_AT = "mock_backup_saved_at"
 
         /** 仅用于避免明文直读，不构成安全边界 */
         val OBFUSCATION_KEY = "jxau-tools-local-obfuscation-v1".toByteArray(Charsets.UTF_8)

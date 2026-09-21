@@ -4,9 +4,11 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
+import cn.edu.jxau.tools.data.RushStore
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.fetchWithHeal
 import cn.edu.jxau.tools.data.model.CourseClass
+import cn.edu.jxau.tools.data.model.RushTask
 import cn.edu.jxau.tools.data.model.SelectionScope
 import cn.edu.jxau.tools.data.model.SelectionStats
 import cn.edu.jxau.tools.data.model.TicketCheckState
@@ -309,6 +311,33 @@ class SelectionViewModel(application: Application) : AndroidViewModel(applicatio
     fun requestAction(course: CourseClass) {
         if (_state.value.busy) return
         _state.update { it.copy(confirm = course) }
+    }
+
+    /**
+     * 加入抢课队列（不立即提交）。去重规则在 [RushStore.add]：同一教学班只留一条未终结任务。
+     * 提示复用 [WriteNotice]，成功也要说清楚「去哪执行」——抢课页不是这个页面。
+     */
+    fun addRushTask(course: CourseClass) {
+        val added = RushStore.get(getApplication()).add(
+            RushTask(
+                classNo = course.classNo,
+                className = course.className,
+                selectCategory = course.selectCategory,
+                batchId = course.batchId,
+                teacher = course.teacher,
+                credit = course.credit,
+                createdAt = System.currentTimeMillis(),
+            )
+        )
+        _state.update {
+            it.copy(
+                notice = WriteNotice(
+                    if (added) "「${course.className}」已加入抢课队列，到「抢课」页开始执行。"
+                    else "「${course.className}」已经在抢课队列里了。",
+                    warning = !added,
+                )
+            )
+        }
     }
 
     fun cancelAction() {

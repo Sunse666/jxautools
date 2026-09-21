@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
@@ -27,6 +28,7 @@ import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.ui.grade.GradeScreen
 import cn.edu.jxau.tools.ui.login.LoginScreen
 import cn.edu.jxau.tools.ui.profile.ProfileScreen
+import cn.edu.jxau.tools.ui.rush.RushScreen
 import cn.edu.jxau.tools.ui.selection.SelectionScreen
 import cn.edu.jxau.tools.ui.timetable.TimetableScreen
 
@@ -59,6 +61,7 @@ fun AppRoot() {
 private enum class Tab(val label: String, val icon: ImageVector) {
     Timetable("课表", Icons.Filled.DateRange),
     Selection("选课", Icons.Filled.AddCircle),
+    Rush("抢课", Icons.Filled.PlayArrow),
     Grade("成绩", Icons.Filled.Star),
     Profile("我的", Icons.Filled.Person),
 }
@@ -90,6 +93,7 @@ private fun MainShell() {
             when (tabs[selected]) {
                 Tab.Timetable -> TimetableScreen()
                 Tab.Selection -> SelectionScreen()
+                Tab.Rush -> RushScreen()
                 Tab.Grade -> GradeScreen()
                 Tab.Profile -> ProfileScreen()
             }

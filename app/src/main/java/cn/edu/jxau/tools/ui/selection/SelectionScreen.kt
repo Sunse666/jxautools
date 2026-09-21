@@ -140,6 +140,7 @@ private fun SelectionBody(state: SelectionUiState, viewModel: SelectionViewModel
                         busy = state.busyClassNo == course.classNo,
                         enabled = state.canActOn(course),
                         onAction = { viewModel.requestAction(course) },
+                        onRush = { viewModel.addRushTask(course) },
                     )
                 }
             }
@@ -343,6 +344,7 @@ private fun CourseRow(
     busy: Boolean,
     enabled: Boolean,
     onAction: () -> Unit,
+    onRush: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -375,8 +377,16 @@ private fun CourseRow(
                     if (busy) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     } else {
-                        OutlinedButton(onClick = onAction, enabled = enabled) {
-                            Text(if (course.selected) "退选" else "选课", style = MaterialTheme.typography.labelMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // 「抢」= 加入抢课队列，不立即提交。已选的课没有抢的意义
+                            if (!course.selected) {
+                                OutlinedButton(onClick = onRush, enabled = enabled) {
+                                    Text("抢", style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                            OutlinedButton(onClick = onAction, enabled = enabled) {
+                                Text(if (course.selected) "退选" else "选课", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }
