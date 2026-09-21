@@ -1,6 +1,8 @@
 package cn.edu.jxau.tools.core
 
 import cn.edu.jxau.tools.data.SessionValidation
+import cn.edu.jxau.tools.data.export.ExamIcs
+import cn.edu.jxau.tools.data.export.IcsWriter
 import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.GradeStats
 import cn.edu.jxau.tools.data.model.RushPolicy
@@ -73,6 +75,8 @@ object SelfTest {
         report("主题色派生", ColorThemeSpec.selfTest())
         report("表面层级配色", JxauPalette.selfTest())
         report("课表空格底纹", TimetableSurface.selfTest())
+        report("日历写出（折行/转义/时区）", IcsWriter.selfTest())
+        report("考试时间解析", ExamIcs.selfTest())
         JxauLog.i("=== 全部自检：$passed/$total 通过 ===")
         return passed to total
     }

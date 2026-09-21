@@ -10,6 +10,19 @@
     <!-- 抢课定时触发（Android 12+ 需用户在设置中授予精确闹钟；未授予时降级为非精确并明示） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
+    <!--
+      Android 11+ 的包可见性过滤：不声明的话 `queryIntentActivities` 看不见别的包，
+      导出 .ics 前那次「有没有 App 能打开日历文件」的预检会**恒为空** ——
+      结果是真有日历 App 的真机上反而谎报「这台设备上没有能导入 .ics 的应用」。
+      这里声明的 intent 必须与 ExamScreen.shareIcs 查询的那个一致。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="text/calendar" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -36,6 +49,21 @@
         <receiver
             android:name=".service.RushAlarmReceiver"
             android:exported="false" />
+
+        <!--
+          导出考试安排为 .ics 时把文件分享给日历 / 邮件 / 微信。
+          文件放 cache/ics/ 下靠 FileProvider 授权，**不需要任何存储权限**
+          （Android 10+ 分区存储下也不该去要 WRITE_EXTERNAL_STORAGE）。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

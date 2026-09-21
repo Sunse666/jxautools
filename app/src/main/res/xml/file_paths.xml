@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 可分享的目录。
+
+  只开放 cache 下的 ics/ 子目录：导出的日历文件是临时产物，放 cache 里
+  系统可以在空间紧张时自己清掉，也不用申请任何存储权限（Android 10+ 分区存储）。
+-->
+<paths>
+    <cache-path
+        name="ics"
+        path="ics/" />
+</paths>
