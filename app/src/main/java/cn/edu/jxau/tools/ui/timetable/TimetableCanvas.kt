@@ -79,12 +79,13 @@ private val ZEBRA_SHAPE = RoundedCornerShape(6.dp)
 internal fun WeekTable(
     grid: LessonGrid,
     week: Int,
-    todayWeek: Int,
+    /** 今天第几周；null = 算不出来，此时不高亮「今天」那一列 */
+    todayWeek: Int?,
     size: TimetableSize,
     modifier: Modifier = Modifier,
     onPick: ((List<CourseSlot>) -> Unit)? = null,
 ) {
-    val todayColumn = if (week == todayWeek) LocalDate.now().dayOfWeek.value else 0
+    val todayColumn = if (todayWeek != null && week == todayWeek) LocalDate.now().dayOfWeek.value else 0
     // 表头与网格**共用同一个横向滚动状态**：一个是列标题、一个是列内容，
     // 各用各的 state 必然滚出「标题和列错位」。
     val hScroll = rememberScrollState()

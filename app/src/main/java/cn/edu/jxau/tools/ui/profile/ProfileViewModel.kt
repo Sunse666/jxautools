@@ -7,10 +7,13 @@ import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.SettingsRepository
 import cn.edu.jxau.tools.data.model.ColorTheme
+import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
+import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.net.SiteProfiles
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDate
 import java.util.Date
 import java.util.Locale
 
@@ -29,10 +32,12 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
 
     private val stampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
 
-    fun loginTimeText(): String {
-        val savedAt = repo.session.value?.savedAt ?: return "—"
-        if (savedAt <= 0L) return "—"
-        return synchronized(stampFormat) { stampFormat.format(Date(savedAt)) }
+    fun loginTimeText(): String = stampText(repo.session.value?.savedAt ?: 0L)
+
+    /** 把 epoch millis 格式化成界面上的时间文本。0 或负数返回「—」而不是 1970 年 */
+    fun stampText(millis: Long): String {
+        if (millis <= 0L) return "—"
+        return synchronized(stampFormat) { stampFormat.format(Date(millis)) }
     }
 
     /**
@@ -103,4 +108,30 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     fun setColumnWidthDp(dp: Int) = settings.setColumnWidthDp(dp)
 
     fun resetTimetableSize() = settings.resetTimetableSize()
+
+    // ---------- 周次校准 ----------
+
+    /**
+     * 用「现在第几周」反推并保存开学日期，返回反推出的第一周周一。
+     *
+     * 反着问用户是有意的：用户知道自己现在第几周（老师会说、班群会发通知），
+     * 但没人记得开学那天是 9 月 3 日还是 8 月 31 日。让他去查校历填日期，
+     * 等于把问题原样推回给用户。
+     *
+     * 同周内任何一天校准结果都相同（先把今天归到本周周一再往前减），
+     * 所以周中校准不会整体偏一周 —— 见 [WeekMath.anchorFromWeekNo] 及其自检。
+     */
+    fun calibrateWeek(weekNo: Int): LocalDate {
+        val today = LocalDate.now()
+        val monday = WeekMath.anchorFromWeekNo(today, weekNo)
+        settings.setTermAnchor(monday, TermAnchor.Source.MANUAL)
+        JxauLog.i("周次校准：用户填「现在第 $weekNo 周」（今天 $today）→ 第一周周一 = $monday")
+        return monday
+    }
+
+    /** 清除校准，回到「有考试安排就用、没有就提示校准」的状态 */
+    fun clearWeekAnchor() {
+        JxauLog.i("周次校准：清除手动锚点")
+        settings.clearTermAnchor()
+    }
 }

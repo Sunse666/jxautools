@@ -3,6 +3,7 @@ package cn.edu.jxau.tools.data
 import android.content.Context
 import cn.edu.jxau.tools.data.model.AppPreferences
 import cn.edu.jxau.tools.data.model.ColorTheme
+import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableSize
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
@@ -27,6 +28,8 @@ class SettingsStore(context: Context) {
             colorTheme = ColorTheme.ofKey(prefs.getString(KEY_COLOR_THEME, null)),
             // 走 fromStored：存量值可能不是当前档位（旧版本 / 被手改过），这里统一吸附
             timetableSize = TimetableSize.fromStored(height, width),
+            // 走 decode：脏值一律读成「没有锚点」，不会拿一个错误的开学日期去算整学期周次
+            termAnchor = TermAnchor.decode(prefs.getString(KEY_TERM_ANCHOR, null)),
         )
     }
 
@@ -36,6 +39,8 @@ class SettingsStore(context: Context) {
             .putString(KEY_COLOR_THEME, prefs_.colorTheme.key)
             .putInt(KEY_PERIOD_HEIGHT, prefs_.timetableSize.periodHeightDp)
             .putInt(KEY_COLUMN_WIDTH, prefs_.timetableSize.columnWidthDp)
+            // 传 null 会把键整个移除，正好对应「清除校准」
+            .putString(KEY_TERM_ANCHOR, prefs_.termAnchor?.encode())
             .apply()
     }
 
@@ -45,5 +50,6 @@ class SettingsStore(context: Context) {
         const val KEY_COLOR_THEME = "color_theme"
         const val KEY_PERIOD_HEIGHT = "timetable_period_height"
         const val KEY_COLUMN_WIDTH = "timetable_column_width"
+        const val KEY_TERM_ANCHOR = "term_anchor"
     }
 }

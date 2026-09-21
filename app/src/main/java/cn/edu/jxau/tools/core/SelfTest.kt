@@ -4,6 +4,7 @@ import cn.edu.jxau.tools.data.SessionValidation
 import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.GradeStats
 import cn.edu.jxau.tools.data.model.RushPolicy
+import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
@@ -61,6 +62,7 @@ object SelfTest {
         report("RSA 密码加密", CasRsa.selfTest())
         report("周次解析", WeekParser.selfTest())
         report("教学周推算", WeekMath.selfTest())
+        report("周次锚点存取", TermAnchor.selfTest())
         report("课表格子归纳", TimetableGrid.selfTest())
         report("成绩统计口径", GradeStats.selfTest())
         report("选课容量与汇总口径", CourseClass.selfTest())

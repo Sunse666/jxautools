@@ -380,6 +380,15 @@ data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.DEFAULT,
     val colorTheme: ColorTheme = ColorTheme.DEFAULT,
     val timetableSize: TimetableSize = TimetableSize.DEFAULT,
+    /**
+     * 「第一周周一」锚点，用来把今天换算成第几周。
+     *
+     * null = 没有锚点（既没手动校准、考试安排也没反推出来）。这时**不要**拿第 1 周顶替 ——
+     * 「不知道第几周」和「现在是第 1 周」是两件事，混起来会让用户在错误的周次上看一整周课表。
+     *
+     * 它和主题/尺寸放在同一个 prefs 文件里，因为都属于「跟会话生命周期无关的应用级状态」。
+     */
+    val termAnchor: TermAnchor? = null,
 ) {
     /** 给「我的」页入口行用的摘要文案。两个维度都要露出来，否则「颜色没换成功」看不出是哪个没生效 */
     fun themeSummary(systemDark: Boolean): String = buildString {

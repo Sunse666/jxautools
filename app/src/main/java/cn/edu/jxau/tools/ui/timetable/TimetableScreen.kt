@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.data.SettingsRepository
@@ -142,8 +143,12 @@ private fun Header(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = state.anchorLine.ifBlank { " " },
+                // 不可信时整句已经在下方的警示卡里了，这里只放短状态 —— 同一句话不能出现两次
+                text = (if (state.anchorReliable) state.anchorLine else state.anchorShort).ifBlank { " " },
                 style = MaterialTheme.typography.labelSmall,
+                // 硬保证一行：这行字变长会把「学期 / 本周」按钮挤下去
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = if (state.anchorReliable) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 } else {
@@ -174,7 +179,11 @@ private fun Header(
             }
         }
 
-        TextButton(onClick = onGotoToday, enabled = !state.isTodayWeek) { Text("本周") }
+        TextButton(
+            onClick = onGotoToday,
+            // 今天第几周都算不出来时，没有「本周」可跳 —— 置灰而不是跳到第 1 周冒充本周
+            enabled = state.todayWeek != null && !state.isTodayWeek,
+        ) { Text("本周") }
     }
 }
 
@@ -246,12 +255,25 @@ private fun WeekBar(state: TimetableUiState, onPrev: () -> Unit, onNext: () -> U
  * 周次标题上的日期区间。
  *
  * 锚点未知时返回「开学日期未知」而不是编一个日期——差一周的课表比没有课表更坑人。
+ * 开学前 / 放假时额外标出来：这两个时段里「第 N 周」是没有意义的，不说清楚用户会以为课表错了。
+ *
+ * 「锚点未知」和「学期不符」要分开写：前者去校准有用，后者校准了也没用（得切回当前学期）。
  */
 private fun weekRangeLabel(state: TimetableUiState): String {
-    val anchor = state.anchorMonday ?: return "开学日期未知，周次请手动确认"
+    val anchor = state.anchorMonday
+        ?: return if (state.anchorMismatch) {
+            "非当前学期，不推算周次；切回当前学期即可"
+        } else {
+            "开学日期未知，周次请在「我的 → 周次校准」设定"
+        }
     val monday = WeekMath.mondayOfWeek(anchor, state.week)
     val sunday = monday.plusDays(6)
-    return "${WeekMath.shortLabel(monday)} - ${WeekMath.shortLabel(sunday)}"
+    val range = "${WeekMath.shortLabel(monday)} - ${WeekMath.shortLabel(sunday)}"
+    return when (state.todayPhase) {
+        WeekMath.TodayPosition.Phase.BEFORE -> "$range · 还没开学"
+        WeekMath.TodayPosition.Phase.AFTER -> "$range · 可能在假期"
+        else -> range
+    }
 }
 
 // ---------- 课程详情 ----------

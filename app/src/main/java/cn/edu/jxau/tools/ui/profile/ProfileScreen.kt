@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -47,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -63,11 +68,14 @@ import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.core.SelfTest
 import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.CourseSlot
+import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
+import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.timetable.WeekTable
+import java.time.LocalDate
 import kotlin.math.roundToInt
 
 /** 与 app/build.gradle.kts 的 versionName 保持一致（改了记得同步） */
@@ -109,6 +117,7 @@ fun ProfileScreen(viewModel: ProfileViewModel = viewModel()) {
 private enum class ProfilePage(val title: String, val icon: ImageVector) {
     Appearance("外观主题", Icons.Filled.Settings),
     Timetable("课表显示", Icons.Filled.DateRange),
+    WeekAnchor("周次校准", Icons.Filled.Edit),
     Session("会话与保活", Icons.Filled.Person),
     Mock("本地演练", Icons.Filled.PlayArrow),
     Diagnostics("诊断与日志", Icons.Filled.Build),
@@ -165,6 +174,12 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
                     append("格子 ${prefs.timetableSize.periodHeightDp}dp · 列宽 ${prefs.timetableSize.columnWidthDp}dp")
                     if (!prefs.timetableSize.isDefault) append("（已自定义）")
                 },
+                onOpen = onOpen,
+            )
+            NavRow(
+                page = ProfilePage.WeekAnchor,
+                title = "周次校准",
+                summary = weekAnchorSummary(prefs.termAnchor),
                 onOpen = onOpen,
             )
         }
@@ -234,6 +249,7 @@ private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBac
     when (page) {
         ProfilePage.Appearance -> AppearancePage(viewModel, onBack)
         ProfilePage.Timetable -> TimetableSizePage(viewModel, onBack)
+        ProfilePage.WeekAnchor -> WeekAnchorPage(viewModel, onBack)
         ProfilePage.Session -> SessionPage(viewModel, onBack)
         ProfilePage.Mock -> MockPage(viewModel, onBack)
         ProfilePage.Diagnostics -> DiagnosticsPage(onBack)
@@ -519,6 +535,141 @@ private fun buildSizePreviewGrid() = TimetableGrid.buildLessonGrid(
     ),
     1,
 )
+
+// ---------- 子页：周次校准 ----------
+
+/** 入口行摘要：当前锚点算什么值、今天算第几周 */
+private fun weekAnchorSummary(anchor: TermAnchor?): String {
+    if (anchor == null) return "未设定 · 周次算不出来"
+    val position = WeekMath.positionOf(anchor.monday, LocalDate.now())
+    val date = WeekMath.shortLabel(anchor.monday)
+    return when {
+        position.inTerm -> "第 ${position.week} 周 · 开学 $date（${anchor.source.label}）"
+        position.phase == WeekMath.TodayPosition.Phase.BEFORE -> "开学 $date · 还没开学（${anchor.source.label}）"
+        else -> "开学 $date · 现在不在学期内（${anchor.source.label}）"
+    }
+}
+
+/**
+ * 周次校准页。
+ *
+ * ## 为什么让用户填「现在第几周」而不是「开学日期」
+ * 用户通常知道自己现在第几周（老师会说、班群会发通知），但没人记得开学那天是
+ * 9 月 3 日还是 8 月 31 日。问他周次几乎零成本，问日期等于让他去查校历再回来。
+ *
+ * ## 为什么这个页存在
+ * 教务处不提供开学日期，App 只能用考试安排反推，而学期初的考试安排里**只有补考**
+ * （期末考要到期末才排），于是没挂科的人根本拿不到数据。这个页是那条链路的兜底。
+ */
+@Composable
+private fun WeekAnchorPage(viewModel: ProfileViewModel, onBack: () -> Unit) {
+    val prefs by viewModel.settings.prefs.collectAsState()
+    val anchor = prefs.termAnchor
+
+    // 输入框初值 = 当前锚点算出来的周次（没有锚点就第 1 周）。
+    // 用 remember 只算一次：写成普通表达式的话，用户点 ＋/− 时会被重组覆盖回原值。
+    val initialWeek = remember {
+        val a = viewModel.settings.prefs.value.termAnchor
+        a?.let { WeekMath.positionOf(it.monday, LocalDate.now()).week }?.coerceAtLeast(1) ?: 1
+    }
+    var weekInput by rememberSaveable { mutableIntStateOf(initialWeek) }
+    var hint by remember { mutableStateOf("") }
+
+    DetailScaffold(title = "周次校准", onBack = onBack) {
+        SectionCard("当前状态") {
+            if (anchor == null) {
+                InfoRow("第一周周一", "未设定")
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "没有参照点就算不出「现在第几周」。下面填一次即可，之后长期有效。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                val position = WeekMath.positionOf(anchor.monday, LocalDate.now())
+                InfoRow("第一周周一", WeekMath.shortLabel(anchor.monday))
+                InfoRow("来源", anchor.source.label)
+                if (anchor.savedAt > 0) InfoRow("设定于", viewModel.stampText(anchor.savedAt))
+                InfoRow(
+                    "今天",
+                    when {
+                        position.inTerm -> "第 ${position.week} 周"
+                        position.phase == WeekMath.TodayPosition.Phase.BEFORE -> "还没开学"
+                        else -> "学期已结束（可能在假期）"
+                    },
+                )
+            }
+        }
+
+        SectionCard("校准") {
+            Text(
+                "填「现在第几周」，我会反推出开学日期并保存。第 1 周就是开学那一周；" +
+                    "同一周里周几填都一样，不会因为今天是周三就偏一周。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { weekInput = (weekInput - 1).coerceAtLeast(1) },
+                    enabled = weekInput > 1,
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                ) { Text("−") }
+                Text(
+                    "第 $weekInput 周",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    onClick = { weekInput = (weekInput + 1).coerceAtMost(WeekMath.MAX_WEEK) },
+                    enabled = weekInput < WeekMath.MAX_WEEK,
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                ) { Text("＋") }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = {
+                    val monday = viewModel.calibrateWeek(weekInput)
+                    hint = "已保存：第一周周一 = ${WeekMath.shortLabel(monday)}"
+                }) { Text("设为当前周") }
+                if (anchor != null) {
+                    OutlinedButton(onClick = {
+                        viewModel.clearWeekAnchor()
+                        hint = "已清除校准。课表会改回按考试安排推算，推不出来就要重新设定。"
+                    }) { Text("清除") }
+                }
+            }
+            if (hint.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        SectionCard("为什么会算不出来") {
+            Text(
+                "教务系统不提供开学日期：学期列表只有学期编码，课表字段里没有任何日期，" +
+                    "首页也没有周次。App 只能拿考试安排的「周次 + 日期」反推，" +
+                    "而学期初的考试安排里通常只有补考 —— 没挂科的同学一条都拿不到，" +
+                    "所以大多数人开学前后需要在这里手动设一次。\n\n" +
+                    "设好之后会一直保存；放假或换了学期，这里会显示「现在不在学期内」，" +
+                    "那说明该重新设定了，而不是课表错了。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+    }
+}
 
 // ---------- 子页：会话与保活 ----------
 
