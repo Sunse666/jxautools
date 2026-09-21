@@ -73,6 +73,7 @@ import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
+import cn.edu.jxau.tools.ui.exam.ExamScreen
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.timetable.WeekTable
 import java.time.LocalDate
@@ -115,12 +116,20 @@ fun ProfileScreen(viewModel: ProfileViewModel = viewModel()) {
 
 /** 「我的」页的子项清单。新增设置项 = 在这里加一行 */
 private enum class ProfilePage(val title: String, val icon: ImageVector) {
+    // ---- 我的信息（教务系统里的本人资料，只读） ----
+    Exam("考试安排", Icons.Filled.DateRange),
+
+    // ---- 设置 ----
     Appearance("外观主题", Icons.Filled.Settings),
     Timetable("课表显示", Icons.Filled.DateRange),
     WeekAnchor("周次校准", Icons.Filled.Edit),
+
+    // ---- 会话与维护 ----
     Session("会话与保活", Icons.Filled.Person),
     Mock("本地演练", Icons.Filled.PlayArrow),
     Diagnostics("诊断与日志", Icons.Filled.Build),
+
+    // ---- 其他 ----
     About("关于", Icons.Filled.Info),
     ;
 
@@ -157,6 +166,18 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
             InfoRow("会话", if (session?.isUsable == true) "有效" else "未登录")
             InfoRow("静默续期", if (hasTgt) "已持有 TGT（免验证码）" else "无 TGT")
             InfoRow("保活", if (keepalive) "运行中" else "未运行")
+        }
+
+        // 「我的信息」= 教务系统里关于本人的只读资料。与下面几组的区别是：
+        // 这里的每一项都是**从服务端读回来的事实**，不能改，改了也没意义。
+        SettingsGroup("我的信息") {
+            NavRow(
+                page = ProfilePage.Exam,
+                title = "考试安排",
+                summary = "本学期考试时间与考场",
+                onOpen = onOpen,
+                showDivider = false,
+            )
         }
 
         SettingsGroup("设置") {
@@ -247,6 +268,8 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
 @Composable
 private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBack: () -> Unit) {
     when (page) {
+        // 考试安排在 exam 包里，自带外壳（DetailScaffold）与自己的 ViewModel
+        ProfilePage.Exam -> ExamScreen(onBack = onBack)
         ProfilePage.Appearance -> AppearancePage(viewModel, onBack)
         ProfilePage.Timetable -> TimetableSizePage(viewModel, onBack)
         ProfilePage.WeekAnchor -> WeekAnchorPage(viewModel, onBack)
@@ -257,9 +280,14 @@ private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBac
     }
 }
 
-/** 子页统一外壳：返回按钮 + 标题 + 可滚动内容 */
+/**
+ * 子页统一外壳：返回按钮 + 标题 + 可滚动内容。
+ *
+ * `internal` 而不是 `private`：考试安排等子页挂在「我的」下，但代码分在各自包里，
+ * 需要复用同一个外壳。样式统一由这里说了算，各页不要各画一套。
+ */
 @Composable
-private fun DetailScaffold(
+internal fun DetailScaffold(
     title: String,
     onBack: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
