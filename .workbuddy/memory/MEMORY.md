@@ -27,7 +27,12 @@
   - 考试安排 `PaiKaoManage/KaoShiAnPaiChaXunManage/GetKaoShiInfo_Student/{uuid}`（body `Xq`）
   - 学期列表 `Common/BaseData/GetKsXq/{uuid}`（降序，**第一个即当前学期**）
   - 成绩 `SystemManage/CJManage/GetXsCjByXh/{uuid}`；退选 `KcManage/GxKcManage/DelXkinfo/{uuid}`
-  - `User/CheckGuid` 返回 `Result:false` = 选课窗口未开放
+  - `User/CheckGuid` 是 **guid 票据校验**（`Result:false` = 票据无效），**不是窗口开关**——旧结论「false=未开放」已勘误
+  - **窗口首选信号 = `Getxkqq`**：关闭时 `Data:[] + Result:true`；`GetGxkcTree` 正常返回**裸 JSON 数组**，`[]` 是「没批次」不是「请求失败」（postElement 必须接受 JsonArray）
+  - **窗口关闭时 `GetKcInfo` 照常出数据**（任选 130 条）——「没有权限访问该页面」= 会话失效，别误判成窗口未开放
+  - 会话失效页（945 字符）会**回显 uuid**（`data-url`），所以「正文含 uuid」不能单独当有效判据：**失效标记优先于正面证据**（SessionValidation.kt 纯函数 + 自检）
+  - 自愈不能只挂 240s 心跳（先 sleep 后干活 = 冷启动裸奔 4 分钟）→ `fetchWithHeal`：数据页加载前 ensureHealthy，失效即 TGT 续期重试；续期加 Mutex + 60s 节流防并发换出两个会话
+  - 下毒验证工具 `tools/poison_session.py`（保留 TGT 换假 Cookie）；写回 SharedPreferences 用 base64 走命令行，**不要用 adb shell stdin**（会写空文件）
 - 成绩字段陷阱：
   - **`totalCount` 会返回 0**（实测 27 行数据给 `totalCount: 0`）。直接当分页终止条件会
     **静默截断成只有第一页** → 必须 `<= 0` 视为「没给总数」。
