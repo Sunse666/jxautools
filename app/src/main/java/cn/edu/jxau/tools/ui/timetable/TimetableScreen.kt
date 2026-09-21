@@ -2,6 +2,7 @@ package cn.edu.jxau.tools.ui.timetable
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,13 +62,28 @@ import cn.edu.jxau.tools.data.model.WeekParser
 import java.time.LocalDate
 
 /** 节次轴列宽：数字 + 上午/下午/晚上小字 */
-private val AXIS_WIDTH = 26.dp
+private val AXIS_WIDTH = 30.dp
 
-/** 单节基础高度。连堂块 = span × 此高 + (span-1) × 间隙，保持与轴逐节对齐 */
-private val PERIOD_HEIGHT = 52.dp
+/**
+ * 单节基础高度。连堂块 = span × 此高 + (span-1) × 间隙，保持与轴逐节对齐。
+ * 定得比「刚好放得下」大一档：课名要能读到整词，而不是「毛泽东思…」。
+ */
+private val PERIOD_HEIGHT = 64.dp
 
 /** 节与节之间的空隙（不按午休/晚休分段，行是连续的） */
-private val PERIOD_GAP = 2.dp
+private val PERIOD_GAP = 3.dp
+
+/**
+ * 课程列固定宽。**不能再用 weight 均分**：7 列均分在手机上每列只有 40~50dp，
+ * 课名只能挤三四个字。定宽 + 横向滚动，宽度由可读性决定，而不由屏幕宽度决定。
+ */
+private val COLUMN_WIDTH = 74.dp
+
+/** 列与列之间的空隙 */
+private val COLUMN_GAP = 3.dp
+
+/** 周几表头行的高度。表头独占顶部一行，节次轴与网格都从它下方同一起点开始 */
+private val HEADER_HEIGHT = 34.dp
 
 /** 课程块圆角 */
 private val BLOCK_SHAPE = RoundedCornerShape(8.dp)
@@ -297,8 +313,17 @@ private fun weekRangeLabel(state: TimetableUiState): String {
 // ---------- 周课表 ----------
 
 /**
- * 周课表：表头与节次轴固定，只有课程网格上下滚动——
- * 滚动后「现在是第几节、今天周几」始终可见。
+ * 周课表：横竖四个方向都能滚，但**冻结的是表头**（纵向固定、横向跟随网格），
+ * 节次轴则跟网格一起在同一个纵向滚动容器里。
+ *
+ * ## 为什么轴不能「固定不滚」
+ * 轴若不滚、网格滚，滚到下半段时第 7 节的行下面印着轴上的「5」——数字与内容错位，
+ * 比看不见节次号更糟。轴与网格同处一个纵向滚动容器，两条边就天然对齐。
+ *
+ * ## 为什么横向与纵向是两个嵌套容器，而不是一个 Modifier 链
+ * 实测把 `horizontalScroll` 和 `verticalScroll` 叠在同一个 Row 上（且共享状态）时，
+ * 手势方向判定会出错：横滚到右侧后再上下滑，画面纹丝不动。
+ * 改成父子嵌套（外层纵滚、网格内层横滚）后，纵滑归父、横滑归子，方向不再打架。
  */
 @Composable
 private fun WeekTable(
@@ -310,60 +335,81 @@ private fun WeekTable(
 ) {
     val todayColumn = if (week == todayWeek) LocalDate.now().dayOfWeek.value else 0
     val pitch = PERIOD_HEIGHT + PERIOD_GAP
+    // 表头与网格**共用同一个横向滚动状态**：一个是列标题、一个是列内容，
+    // 各用各的 state 必然滚出「标题和列错位」。
+    val hScroll = rememberScrollState()
+    val vScroll = rememberScrollState()
+    val lastPeriod = grid.periodCount - 1
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp),
     ) {
-        // 表头（固定）：节次轴占位 + 星期一..日（周末也显示）
+        // 表头行：纵向固定（永远看得到周几），横向跟随网格
         Row(modifier = Modifier.fillMaxWidth()) {
             Spacer(Modifier.width(AXIS_WIDTH))
-            WEEKDAY_SHORT.forEachIndexed { index, label ->
-                val weekday = index + 1
-                Text(
-                    text = label,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 4.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = if (weekday == todayColumn) FontWeight.Bold else FontWeight.Normal,
-                    color = if (weekday == todayColumn) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(hScroll),
+            ) {
+                WEEKDAY_SHORT.forEachIndexed { index, label ->
+                    val weekday = index + 1
+                    Box(
+                        modifier = Modifier
+                            .width(COLUMN_WIDTH)
+                            .height(HEADER_HEIGHT),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = label,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (weekday == todayColumn) FontWeight.Bold else FontWeight.Normal,
+                            color = if (weekday == todayColumn) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    if (index < WEEKDAY_SHORT.lastIndex) Spacer(Modifier.width(COLUMN_GAP))
+                }
             }
         }
 
-        Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            // 节次轴（固定不滚）：1、2、3…逐节，上午/下午/晚上在段首竖排标注
+        // 主体：纵向滚动容器把「节次轴 + 网格」包在一起（保证两者逐节对齐），
+        // 网格自己再套一层横向滚动 —— 轴横向上始终贴在左边。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(vScroll),
+        ) {
             Column(modifier = Modifier.width(AXIS_WIDTH)) {
                 repeat(grid.periodCount) { i ->
                     PeriodAxisCell(
                         number = i + 1,
-                        modifier = Modifier.height(if (i == grid.periodCount - 1) PERIOD_HEIGHT else pitch),
+                        modifier = Modifier.height(if (i == lastPeriod) PERIOD_HEIGHT else pitch),
                     )
                 }
             }
 
-            // 课程网格（唯一滚动区）
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    .horizontalScroll(hScroll),
             ) {
                 (1..7).forEach { weekday ->
                     DayColumn(
                         blocks = grid.blocks(weekday),
                         periodCount = grid.periodCount,
                         onPick = onPick,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.width(COLUMN_WIDTH),
                     )
+                    if (weekday < 7) Spacer(Modifier.width(COLUMN_GAP))
                 }
             }
         }
@@ -388,7 +434,7 @@ private fun PeriodAxisCell(number: Int, modifier: Modifier = Modifier) {
     ) {
         Text(
             text = number.toString(),
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -396,8 +442,8 @@ private fun PeriodAxisCell(number: Int, modifier: Modifier = Modifier) {
             Spacer(Modifier.width(2.dp))
             Text(
                 text = it.toCharArray().joinToString("\n"),
-                fontSize = 8.sp,
-                lineHeight = 9.sp,
+                fontSize = 9.sp,
+                lineHeight = 10.sp,
                 color = MaterialTheme.colorScheme.outline,
                 textAlign = TextAlign.Center,
             )
@@ -408,6 +454,7 @@ private fun PeriodAxisCell(number: Int, modifier: Modifier = Modifier) {
 /**
  * 一天的列：斑马纹空格打底（行连续，不按午晚休分段），课块按节次绝对定位。
  * 连堂课纵向合并：块高 = span × 单节高 + (span-1) × 间隙，与节次轴逐节对齐。
+ * 宽度由调用方给定（[COLUMN_WIDTH]，固定值）——网格整体横向滚动靠它。
  */
 @Composable
 private fun DayColumn(
@@ -469,28 +516,28 @@ private fun CourseBlock(
     ) {
         Box(
             modifier = Modifier
-                .width(3.dp)
+                .width(4.dp)
                 .fillMaxHeight()
                 .background(colors.accent),
         )
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 3.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 5.dp),
         ) {
             if (block.stacked) {
                 // 时间重叠的组：块上标门数，详情里全列
                 Text(
                     "${block.courses.size} 门",
-                    fontSize = 8.sp,
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     color = colors.onContainer,
                 )
             }
             Text(
                 first.courseName,
-                fontSize = 11.sp,
-                lineHeight = 13.sp,
+                fontSize = 12.sp,
+                lineHeight = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = nameMaxLines,
                 overflow = TextOverflow.Ellipsis,
@@ -499,8 +546,8 @@ private fun CourseBlock(
             first.place.takeIf { it.isNotBlank() && it != "未定" }?.let { place ->
                 Text(
                     "@$place",
-                    fontSize = 9.sp,
-                    lineHeight = 11.sp,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
                     maxLines = placeMaxLines,
                     overflow = TextOverflow.Ellipsis,
                     color = colors.onContainer.copy(alpha = 0.78f),
