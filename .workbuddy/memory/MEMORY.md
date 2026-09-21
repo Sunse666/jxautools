@@ -98,6 +98,30 @@
 - 构建全程命令行 Gradle，**不用 Android Studio**。
 - 日志 tag `JXAU_NET`：`adb logcat -d -s JXAU_NET`。
 
+## 主题与配色（2026-09-21 起，提交 1918920 / 887dcbc）
+- **两个正交维度**：`ThemeMode`（跟随系统/浅色/深色）管深浅，`ColorTheme`（经典蓝/青碧/竹青/
+  紫罗兰/玫红/暖橙）管颜色。枚举只放 `key`/`label`（data.model 不引 Compose），
+  种子色与派生在 `ui.theme.ColorThemeSpec`。存储键 `color_theme` 存字符串，脏值回退默认。
+- **强调色派生按「目标相对亮度」反解明度，不写 HSL 的 lightness**：后者不是感知亮度，
+  固定 L=0.36 时青碧色的白字对比只有 2.51（不可读）。现浅色 primary 目标亮度 0.145、
+  容器 0.820；深色 primary 0.450、容器 0.085。六主题对比度因此齐平（浅 ≥5.37 / 深 ≥7.11）。
+- **反解用「等步长扫描取最近」而不是二分**：二分的收敛点是浮点位，再量化到 8 位时
+  Kotlin(Float32) 与 Python(float64) 会落到**相邻台阶**（实测偏差达 70/1000）。扫描法比较的是
+  「已量化颜色」的亮度，候选集合两边相同，选中项不受精度摆布。断言一并给 ±1 最小单位容差，
+  否则取整边界（如 1343.5）会产生假 FAIL。
+- **中性色恒定、只有强调色跟色相走**：surface/background/surfaceVariant/outline 固定灰蓝。
+  理由：课表十色课程块是跟 surface 混色得到的，surface 一偏就得全部重调。
+  因此 `surfaceTint` 必须显式设为 `Color.Transparent` —— 用 `primary` 会让 elevation 染色
+  （底部栏变淡紫而内容卡片仍白，一半染色一半不染反而脏）。
+- **M3 baseline 是紫色的**：`lightColorScheme()` 只覆盖传进去的角色，漏掉的那个会落回
+  baseline（`#6750A4` 系）。踩过：`surfaceContainer` 没传 → 底部导航栏永远淡紫，切主题不变。
+  现在 M3 1.3 会用到的颜色角色全部显式给出（surfaceContainer 五档、surfaceDim/Bright、
+  inverse 系、inversePrimary、outlineVariant、tertiary 对齐 secondary）。
+- 课表空格底纹 `TimetableSurface`：奇 0.24 / 偶 0.60 混入 surfaceVariant + 每格 1dp 描边
+  （0.32 混入 outline）。旧写法「奇数行透明」= 1/3/5/7/9/11 节与背景同色（对比度 1.0000），
+  那些行等于没有格子。
+- `mix`（颜色线性插值）只保留一份实现：`ui.theme.mixColors`，CoursePalette / TimetableSurface 委托它。
+
 ## 工作约定
 - 每轮实质改动落一次本地 git 提交，提交信息中文，写清「改了什么 + 为什么 + 怎么验证的」。
 - 零警告零错误是底线。
@@ -117,4 +141,12 @@
      饱和色块中心间距 = 列宽 + 间隙）。上一轮「轴固定但数字错位」就是只靠眼睛看漏掉的。
 - **验证「跟随系统」主题**：`adb shell cmd uimode night no|yes` 直接翻转系统深色，双向都要试
   （只验一边等于没验）；同时看界面内的「系统 X / 实际生效 Y」两行是否同步。
+- **配色/底纹这类「不崩不报错、只是难看」的东西也要有断言**：可量化的口径有三类 ——
+  WCAG 对比度（字要看得清）、两两距离（颜色不能塌缩成一片）、亮度关系（浅色主题里主色
+  必须比容器深）。再加一条**变异探针**把旧实现固化成断言，否则「现在是好的」不等于
+  「坏的时候抓得住」。期望值全部由 Python 独立重算（`tools/verify_theme_palette.py`）。
+- **像素色值也能逐字节对账模型**：`tools/measure_stripe_contrast.py` 按行扫描截图，
+  把每行底色与模型值（`#F2F3F8`/`#17191E`…）逐字节比对，任何一行与背景同色即 FAIL。
+  比「看截图说好看」硬得多，也能当旧缺陷的回归检查。采样时别取「最暗像素」
+  （会采到压在该列上的课程块），要取边界像素的**众数**。
 
