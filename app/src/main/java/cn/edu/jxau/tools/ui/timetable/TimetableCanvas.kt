@@ -1,6 +1,7 @@
 package cn.edu.jxau.tools.ui.timetable
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,10 +21,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -204,9 +205,12 @@ private fun PeriodAxisCell(number: Int, height: Dp) {
 }
 
 /**
- * 一天的列：斑马纹空格打底（行连续，不按午晚休分段），课块按节次绝对定位。
+ * 一天的列：底纹打底（**奇偶两档都有色**，行连续不按午晚休分段），课块按节次绝对定位。
  * 连堂课纵向合并：块高 = span × 单节高 + (span-1) × 间隙，与节次轴逐节对齐
  * （对齐关系由 [TimetableSize.blockHeightDp] / [TimetableSize.rowBottomDp] 保证并自检）。
+ *
+ * 两档底色 + 描边见 [TimetableSurface]：早先「奇数行透明」的写法让 1/3/5/7/9/11 节
+ * 与页面背景同色，那些行等于没有格子。
  */
 @Composable
 private fun DayColumn(
@@ -216,6 +220,16 @@ private fun DayColumn(
     onPick: ((List<CourseSlot>) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    // 底纹只由三个中性色决定（不随主题色相变），按这三个颜色缓存，避免每列每帧重算
+    val stripes = remember(scheme.background, scheme.surfaceVariant, scheme.outline) {
+        TimetableSurface.stripes(
+            background = scheme.background,
+            surfaceVariant = scheme.surfaceVariant,
+            outline = scheme.outline,
+        )
+    }
+
     Box(modifier = modifier.clip(ZEBRA_SHAPE)) {
         Column {
             repeat(periodCount) { i ->
@@ -224,11 +238,8 @@ private fun DayColumn(
                         .fillMaxWidth()
                         .height(if (i == periodCount - 1) size.periodHeightDp.dp else size.pitchDp.dp)
                         .padding(vertical = 1.dp)
-                        .background(
-                            if (i % 2 == 1) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                            else Color.Transparent,
-                            ZEBRA_SHAPE,
-                        ),
+                        .background(if (i % 2 == 0) stripes.oddRow else stripes.evenRow, ZEBRA_SHAPE)
+                        .border(1.dp, stripes.border, ZEBRA_SHAPE),
                 )
             }
         }

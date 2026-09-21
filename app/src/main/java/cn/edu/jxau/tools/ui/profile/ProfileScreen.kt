@@ -1,9 +1,12 @@
 package cn.edu.jxau.tools.ui.profile
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -16,9 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -47,9 +53,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.core.SelfTest
@@ -58,6 +66,7 @@ import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
+import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.timetable.WeekTable
 import kotlin.math.roundToInt
 
@@ -300,8 +309,82 @@ private fun AppearancePage(viewModel: ProfileViewModel, onBack: () -> Unit) {
             }
         }
 
+        SectionCard("主题色") {
+            // 色块画的是**当前明暗下派生出来的真实主色**（不是种子色）：
+            // 种子是饱和原色，浅色主题里主色会被压到相对亮度 0.145 才能让白字看清，
+            // 直接画种子色会让人选完发现「跟刚才看到的不一样」。
+            // 派生一次 6 个主题 = 上千次二分迭代，按明暗缓存，别每次重组都重算。
+            val swatches = remember(effectiveDark) {
+                ColorThemeSpec.allSeeds().map { (theme, _) -> theme to ColorThemeSpec.rolesFor(theme, effectiveDark) }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                swatches.forEach { (theme, roles) ->
+                    val selected = theme == prefs.colorTheme
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { viewModel.setColorTheme(theme) }
+                            .padding(horizontal = 2.dp, vertical = 4.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(roles.primary)
+                                .then(
+                                    if (selected) {
+                                        Modifier.border(
+                                            width = 2.dp,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            shape = CircleShape,
+                                        )
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (selected) {
+                                // 勾的颜色用 onPrimary：它是与 primary 成对推出来的，
+                                // 对比度由 ColorThemeSpec 的自检保证（六个主题里最差 5.3:1）
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    tint = roles.onPrimary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            theme.label,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "六个主题色各自都有浅色与深色两套配色，与上面的明暗模式自由组合——" +
+                    "比如「深色 + 紫罗兰」或「浅色 + 暖橙」。选完立即生效并保存。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         SectionCard("当前状态") {
-            InfoRow("选择", prefs.themeMode.label)
+            InfoRow("配色模式", prefs.themeMode.label)
+            InfoRow("主题色", prefs.colorTheme.label)
             InfoRow("系统", if (systemDark) "深色" else "浅色")
             InfoRow("实际生效", if (effectiveDark) "深色配色" else "浅色配色")
             Spacer(Modifier.height(6.dp))
@@ -525,7 +608,8 @@ private fun DiagnosticsPage(onBack: () -> Unit) {
             Text(
                 "以下纯计算逻辑每次启动都会自动跑一遍，失败项以 [E] 写进日志：" +
                     "密码 RSA 加密、周次解析、教学周推算、课表格子归纳、成绩统计口径、" +
-                    "选课容量与汇总、会话失效判定、抢课回执决策、外观与课表尺寸偏好。",
+                    "选课容量与汇总、会话失效判定、抢课回执决策、外观与课表尺寸偏好、" +
+                    "课程块配色、主题色派生、课表空格底纹。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -3,6 +3,7 @@ package cn.edu.jxau.tools.data
 import android.content.Context
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.model.AppPreferences
+import cn.edu.jxau.tools.data.model.ColorTheme
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableSize
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
@@ -28,6 +29,9 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
     val prefs: StateFlow<AppPreferences> = _prefs.asStateFlow()
 
     fun setThemeMode(mode: ThemeMode) = mutate { it.copy(themeMode = mode) }
+
+    /** 切换主题色相（「经典蓝/青碧/紫罗兰…」）。与明暗模式相互独立，各改各的 */
+    fun setColorTheme(theme: ColorTheme) = mutate { it.copy(colorTheme = theme) }
 
     /**
      * 设置格子高度。传进来的是滑块当前档位的 dp 值。
@@ -57,7 +61,10 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
         _prefs.value = next
         store.save(next)
         when {
-            next.themeMode != current.themeMode -> JxauLog.i("主题已切换：${current.themeMode.label} → ${next.themeMode.label}")
+            next.themeMode != current.themeMode ->
+                JxauLog.i("主题已切换：${current.themeMode.label} → ${next.themeMode.label}")
+            next.colorTheme != current.colorTheme ->
+                JxauLog.i("主题色已切换：${current.colorTheme.label} → ${next.colorTheme.label}")
             next.timetableSize != current.timetableSize ->
                 JxauLog.i(
                     "课表尺寸已更新：格子高 ${next.timetableSize.periodHeightDp}dp、" +

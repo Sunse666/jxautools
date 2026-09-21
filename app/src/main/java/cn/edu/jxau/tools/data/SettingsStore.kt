@@ -2,6 +2,7 @@ package cn.edu.jxau.tools.data
 
 import android.content.Context
 import cn.edu.jxau.tools.data.model.AppPreferences
+import cn.edu.jxau.tools.data.model.ColorTheme
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableSize
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
@@ -23,6 +24,7 @@ class SettingsStore(context: Context) {
         val width = prefs.getInt(KEY_COLUMN_WIDTH, TimetableSizeSpec.DEFAULT_WIDTH)
         return AppPreferences(
             themeMode = ThemeMode.ofKey(prefs.getString(KEY_THEME_MODE, null)),
+            colorTheme = ColorTheme.ofKey(prefs.getString(KEY_COLOR_THEME, null)),
             // 走 fromStored：存量值可能不是当前档位（旧版本 / 被手改过），这里统一吸附
             timetableSize = TimetableSize.fromStored(height, width),
         )
@@ -31,6 +33,7 @@ class SettingsStore(context: Context) {
     fun save(prefs_: AppPreferences) {
         prefs.edit()
             .putString(KEY_THEME_MODE, prefs_.themeMode.key)
+            .putString(KEY_COLOR_THEME, prefs_.colorTheme.key)
             .putInt(KEY_PERIOD_HEIGHT, prefs_.timetableSize.periodHeightDp)
             .putInt(KEY_COLUMN_WIDTH, prefs_.timetableSize.columnWidthDp)
             .apply()
@@ -39,6 +42,7 @@ class SettingsStore(context: Context) {
     private companion object {
         const val PREFS_NAME = "jxau_settings"
         const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_COLOR_THEME = "color_theme"
         const val KEY_PERIOD_HEIGHT = "timetable_period_height"
         const val KEY_COLUMN_WIDTH = "timetable_column_width"
     }

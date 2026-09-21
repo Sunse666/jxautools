@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.SettingsRepository
+import cn.edu.jxau.tools.data.model.ColorTheme
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.net.SiteProfiles
 import kotlinx.coroutines.launch
@@ -93,6 +94,9 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
 
     /** 切换主题。写的是单例里的 StateFlow，Activity 顶层订阅着它 → 立即换配色并落盘 */
     fun setThemeMode(mode: ThemeMode) = settings.setThemeMode(mode)
+
+    /** 切换主题色相。与明暗模式是两个独立维度，切色相不影响深浅 */
+    fun setColorTheme(theme: ColorTheme) = settings.setColorTheme(theme)
 
     fun setPeriodHeightDp(dp: Int) = settings.setPeriodHeightDp(dp)
 

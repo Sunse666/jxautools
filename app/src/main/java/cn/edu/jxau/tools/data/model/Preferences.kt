@@ -36,6 +36,33 @@ enum class ThemeMode(val key: String, val label: String, val detail: String) {
     }
 }
 
+/**
+ * 主题色相（「换什么颜色」），与 [ThemeMode]（「深还是浅」）是**两个正交维度**。
+ *
+ * 拆成两个枚举而不是九个组合枚举，是因为用户的心智就是两个独立开关：
+ * 「我要深色」和「我要紫色」互不冲突。拼成 3×6 个枚举，每加一个色相要补 3 个成员，
+ * 每加一种明暗模式要补 6 个，很快就没人维护得动。
+ *
+ * 这里只放 [key] / [label]（纯数据，不引 Compose）；种子色与派生规则在
+ * `ui.theme.ColorThemeSpec` 里 —— 数据层不该依赖 UI 的颜色类型。
+ */
+enum class ColorTheme(val key: String, val label: String) {
+    BLUE("blue", "经典蓝"),
+    TEAL("teal", "青碧"),
+    GREEN("green", "竹青"),
+    PURPLE("purple", "紫罗兰"),
+    ROSE("rose", "玫红"),
+    ORANGE("orange", "暖橙"),
+    ;
+
+    companion object {
+        val DEFAULT = BLUE
+
+        /** 读存储：不认识的值（空、旧版本、手改过的）回退到 [DEFAULT]，不抛异常 */
+        fun ofKey(key: String?): ColorTheme = entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
 /** 课表格子的档位表与布局常量。所有尺寸只有一个来源，UI 不再自带魔数 */
 object TimetableSizeSpec {
 
@@ -108,6 +135,16 @@ object TimetableSizeSpec {
         check("强制浅色(系统浅)", ThemeMode.LIGHT.isDark(false), false, out)
         check("强制深色(系统浅)", ThemeMode.DARK.isDark(false), true, out)
         check("强制深色(系统深)", ThemeMode.DARK.isDark(true), true, out)
+
+        // ---- 主题色相：读存储的容错 + key 不重复 ----
+        check("色相 ofKey(blue)", ColorTheme.ofKey("blue"), ColorTheme.BLUE, out)
+        check("色相 ofKey(orange)", ColorTheme.ofKey("orange"), ColorTheme.ORANGE, out)
+        check("色相 ofKey(大写 BLUE)", ColorTheme.ofKey("BLUE"), ColorTheme.BLUE, out)
+        check("色相 ofKey(空)", ColorTheme.ofKey(""), ColorTheme.BLUE, out)
+        check("色相 ofKey(null)", ColorTheme.ofKey(null), ColorTheme.BLUE, out)
+        check("色相 ofKey(旧值)", ColorTheme.ofKey("cyan"), ColorTheme.BLUE, out)
+        check("色相 key 唯一", ColorTheme.entries.map { it.key }.toSet().size, ColorTheme.entries.size, out)
+        check("色相数量", ColorTheme.entries.size, 6, out)
 
         // ---- 格子高度吸附 ----
         check("snapHeight(52)", snapHeight(52), 52, out)
@@ -249,13 +286,19 @@ data class TimetableSize(
 /** 本地偏好总集。字段少，用不可变 data class 整体替换，避免半更新状态 */
 data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.DEFAULT,
+    val colorTheme: ColorTheme = ColorTheme.DEFAULT,
     val timetableSize: TimetableSize = TimetableSize.DEFAULT,
 ) {
-    /** 给「我的」页入口行用的摘要文案 */
-    fun themeSummary(systemDark: Boolean): String =
-        if (themeMode == ThemeMode.SYSTEM) {
-            "${themeMode.label}（现在${if (systemDark) "深色" else "浅色"}）"
-        } else {
-            themeMode.label
-        }
+    /** 给「我的」页入口行用的摘要文案。两个维度都要露出来，否则「颜色没换成功」看不出是哪个没生效 */
+    fun themeSummary(systemDark: Boolean): String = buildString {
+        append(
+            if (themeMode == ThemeMode.SYSTEM) {
+                "${themeMode.label}（现在${if (systemDark) "深色" else "浅色"}）"
+            } else {
+                themeMode.label
+            }
+        )
+        append(" · ")
+        append(colorTheme.label)
+    }
 }

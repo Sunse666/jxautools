@@ -1,6 +1,7 @@
 package cn.edu.jxau.tools.ui.timetable
 
 import androidx.compose.ui.graphics.Color
+import cn.edu.jxau.tools.ui.theme.mixColors
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -77,13 +78,8 @@ object CoursePalette {
     fun darkVariants(surface: Color = DARK_SURFACE): List<BlockColors> =
         LIGHT.map { forDarkMode(it, surface) }
 
-    /** 线性插值：t=0 取 a，t=1 取 b */
-    fun mix(a: Color, b: Color, t: Float): Color = Color(
-        red = a.red + (b.red - a.red) * t,
-        green = a.green + (b.green - a.green) * t,
-        blue = a.blue + (b.blue - a.blue) * t,
-        alpha = 1f,
-    )
+    /** 线性插值：t=0 取 a，t=1 取 b。实现收敛在 [cn.edu.jxau.tools.ui.theme.mixColors]（唯一一份） */
+    fun mix(a: Color, b: Color, t: Float): Color = mixColors(a, b, t)
 
     /** 两个颜色在 RGB 空间的距离。用它衡量「肉眼能不能区分」 */
     fun distance(a: Color, b: Color): Float {

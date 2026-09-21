@@ -9,7 +9,10 @@ import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
 import cn.edu.jxau.tools.data.net.CasRsa
+import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
+import cn.edu.jxau.tools.ui.theme.JxauPalette
 import cn.edu.jxau.tools.ui.timetable.CoursePalette
+import cn.edu.jxau.tools.ui.timetable.TimetableSurface
 
 /**
  * 纯函数自检的汇总入口。
@@ -65,6 +68,9 @@ object SelfTest {
         report("抢课回执决策", RushPolicy.selfTest())
         report("外观与课表尺寸偏好", TimetableSizeSpec.selfTest())
         report("课程块配色", CoursePalette.selfTest())
+        report("主题色派生", ColorThemeSpec.selfTest())
+        report("表面层级配色", JxauPalette.selfTest())
+        report("课表空格底纹", TimetableSurface.selfTest())
         JxauLog.i("=== 全部自检：$passed/$total 通过 ===")
         return passed to total
     }
