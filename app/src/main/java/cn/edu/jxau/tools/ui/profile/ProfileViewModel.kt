@@ -7,6 +7,9 @@ import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.SettingsRepository
 import cn.edu.jxau.tools.data.model.ColorTheme
+import cn.edu.jxau.tools.data.model.CustomAccent
+import cn.edu.jxau.tools.data.model.FontFamilyOption
+import cn.edu.jxau.tools.data.model.FontScale
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.WeekMath
@@ -108,9 +111,30 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     /** 切换主题色相。与明暗模式是两个独立维度，切色相不影响深浅 */
     fun setColorTheme(theme: ColorTheme) = settings.setColorTheme(theme)
 
+    /** 改自定义色相的参数。拖色相滑块时每帧调用，靠 repository 的「值没变就返回」收敛 */
+    fun setCustomAccent(accent: CustomAccent) = settings.setCustomAccent(accent)
+
+    /** 只改色相角，保留其它字段（滑块回调只知道自己那一个数） */
+    fun setCustomHue(hue: Int) =
+        setCustomAccent(settings.prefs.value.customAccent.copy(hue = ((hue % 360) + 360) % 360))
+
+    fun setCustomSaturation(level: CustomAccent.SatLevel) =
+        setCustomAccent(settings.prefs.value.customAccent.copy(saturation = level))
+
+    fun setFontScale(scale: FontScale) = settings.setFontScale(scale)
+
+    fun setFontFamily(family: FontFamilyOption) = settings.setFontFamily(family)
+
     fun setPeriodHeightDp(dp: Int) = settings.setPeriodHeightDp(dp)
 
     fun setColumnWidthDp(dp: Int) = settings.setColumnWidthDp(dp)
+
+    /** 课表格子高度微调 ±STEP。滑块拖动精度不够（31 档时 2dp 远小于指尖精度），按钮补这个缺口 */
+    fun nudgePeriodHeightDp(delta: Int) =
+        setPeriodHeightDp(settings.prefs.value.timetableSize.periodHeightDp + delta)
+
+    fun nudgeColumnWidthDp(delta: Int) =
+        setColumnWidthDp(settings.prefs.value.timetableSize.columnWidthDp + delta)
 
     fun resetTimetableSize() = settings.resetTimetableSize()
 

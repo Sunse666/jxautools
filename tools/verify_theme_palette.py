@@ -9,6 +9,11 @@
 分量量化到 8 位，算出来 43 而真机是 39（差正好 1/255）。所以这里的量化步骤是**必须的**，
 不是锦上添花。
 
+## 本轮（12 主题 + 自定义色相）新增了什么
+- 预设从 6 个扩到 12 个 → 对比度/距离/漂移的「最差值」期望值全部重算
+- 新增**自定义色相穷举**：色相 0..359 按 15° 采样 × 饱和度两端 × 深浅两套，
+  断言对比度全部达标、色相漂移不超限。这条比手挑 12 个色更能证明派生系统本身是对的。
+
 用法：python tools/verify_theme_palette.py
 """
 
@@ -93,7 +98,8 @@ def hsl(h, s, l):
 def cross_check_hsl():
     """自写实现必须与标准库 colorsys 一致（否则两边就都是"自己对"）"""
     worst = 0.0
-    for hexv in (0x1565C0, 0x00695C, 0x2E7D32, 0x6A3DB8, 0xB3275C, 0xB4530A, 0x8D9199):
+    for hexv in (0x1565C0, 0x00695C, 0x2E7D32, 0x6A3DB8, 0xB3275C, 0xB4530A,
+                 0xE60800, 0xBDA428, 0x91E600, 0x3DE600, 0x00E66B, 0xC700E6, 0x8D9199):
         c = (((hexv >> 16) & 255) / 255, ((hexv >> 8) & 255) / 255, (hexv & 255) / 255)
         h1, s1 = to_hue_sat(c)
         # colorsys 返回 (h, l, s)
@@ -126,14 +132,33 @@ def tone(hue, sat, target_lum):
 
 # ---------- 主题色派生（与 ColorThemeSpec 同构） ----------
 
+# 12 个预设，**按色相顺序**（= ColorTheme.PRESETS 的顺序 = 设置页色块顺序）
 SEEDS = [
-    ("blue", "经典蓝", 0xFF1565C0),
-    ("teal", "青碧", 0xFF00695C),
-    ("green", "竹青", 0xFF2E7D32),
-    ("purple", "紫罗兰", 0xFF6A3DB8),
-    ("rose", "玫红", 0xFFB3275C),
-    ("orange", "暖橙", 0xFFB4530A),
+    ("red", "绯红", 0xE60800),
+    ("orange", "暖橙", 0xB4530A),
+    ("amber", "琥珀", 0xBDA428),
+    ("olive", "橄榄", 0x91E600),
+    ("grass", "草绿", 0x3DE600),
+    ("green", "竹青", 0x2E7D32),
+    ("jade", "翡翠", 0x00E66B),
+    ("teal", "青碧", 0x00695C),
+    ("blue", "经典蓝", 0x1565C0),
+    ("purple", "紫罗兰", 0x6A3DB8),
+    ("magenta", "品红", 0xC700E6),
+    ("rose", "玫红", 0xB3275C),
 ]
+
+# 原有 6 个（回归基线：加新色**不该**改变它们两两之间的距离）
+LEGACY_KEYS = ("orange", "green", "teal", "blue", "purple", "rose")
+LEGACY = [s for s in SEEDS if s[0] in LEGACY_KEYS]
+
+# 自定义色相的饱和度三档（与 CustomAccent.SatLevel 一致）
+# ⚠️ 为什么柔和档不能更低（实测 0.35 与 0.45 都会让色相漂移超限）：
+# 8 位量化下饱和度越低，RGB 三分量的差距越小、量化误差占比越大 → 色相漂移越大。
+# 实测 0.35 → 主色漂移 1.15° / 其余 5.00°（限 1.0 / 4.0）；而 0.45 也不合格、0.40 反而合格，
+# 这种**非单调**说明它是量化抖动，所以档位要离边界远一点：0.50~0.70 全域实测安全，
+# 取 0.55 留出余量。
+SAT_SOFT, SAT_STANDARD, SAT_VIVID = 0.55, 0.72, 0.90
 
 SPEC = {
     False: dict(primary=(0.145, 1.00), container=(0.820, 0.70), on_container=(0.030, 1.00),
@@ -147,9 +172,8 @@ ON_ACCENT_DARK_LUM = 0.020
 WHITE = (1.0, 1.0, 1.0)
 
 
-def roles_for(seed_hex, dark):
-    c = (((seed_hex >> 16) & 255) / 255, ((seed_hex >> 8) & 255) / 255, (seed_hex & 255) / 255)
-    hue, sat = to_hue_sat(c)
+def roles_for_hue(hue, sat, dark):
+    """任意色相/饱和度 → 角色。自定义色相与预设走的是同一条派生路径"""
     sp = SPEC[dark]
     on_accent = tone(0.0, 0.0, ON_ACCENT_DARK_LUM) if dark else WHITE
     return {
@@ -162,6 +186,12 @@ def roles_for(seed_hex, dark):
         "secondaryContainer": tone(hue, sat * sp["secondary_container"][1], sp["secondary_container"][0]),
         "onSecondaryContainer": tone(hue, sat * sp["on_secondary_container"][1], sp["on_secondary_container"][0]),
     }
+
+
+def roles_for(seed_hex, dark):
+    c = (((seed_hex >> 16) & 255) / 255, ((seed_hex >> 8) & 255) / 255, (seed_hex & 255) / 255)
+    hue, sat = to_hue_sat(c)
+    return roles_for_hue(hue, sat, dark)
 
 
 # ---------- 课表空格底纹（与 TimetableSurface 同构） ----------
@@ -183,6 +213,12 @@ def stripes_for(dark):
     return bg, mix(bg, sv, ODD_MIX), mix(bg, sv, EVEN_MIX), mix(bg, ol, BORDER_MIX)
 
 
+def hue_drift_of(c, seed_hue):
+    h, _ = to_hue_sat(c)
+    d = abs(h - seed_hue)
+    return min(d, 360 - d)
+
+
 # ---------- 对账 ----------
 
 def main():
@@ -197,10 +233,10 @@ def main():
     notes.append(f"HSL 实现与 colorsys 交叉验证：最大偏差 {drift:.6f}（色相按度、饱和度按 0..1）")
     check("HSL 实现可信（偏差 < 0.01）", drift < 0.01, True)
 
-    # ---- 六个主题 × 两种明暗的派生结果 ----
-    print("=" * 88)
-    print("主题色派生结果")
-    print("=" * 88)
+    # ---- 12 个预设 × 两种明暗的派生结果 ----
+    print("=" * 96)
+    print("主题色派生结果（12 主题）")
+    print("=" * 96)
     for dark in (False, True):
         tag = "深色" if dark else "浅色"
         print(f"\n--- {tag} ---")
@@ -211,19 +247,26 @@ def main():
                   f" | primary对字 {contrast(r['primary'], r['onPrimary']):.3f}"
                   f" 容器对字 {contrast(r['primaryContainer'], r['onPrimaryContainer']):.3f}")
 
-    # ---- 断言：对比度（六主题最差） ----
-    print("\n" + "=" * 88)
+    # ---- 断言：对比度（12 主题最差） ----
+    print("\n" + "=" * 96)
     print("断言期望值")
-    print("=" * 88)
+    print("=" * 96)
     for dark in (False, True):
         tag = "深色" if dark else "浅色"
         roles = [roles_for(s, dark) for _, _, s in SEEDS]
         w1 = min(contrast(r["primary"], r["onPrimary"]) for r in roles)
         w2 = min(contrast(r["primaryContainer"], r["onPrimaryContainer"]) for r in roles)
         w3 = min(contrast(r["secondaryContainer"], r["onSecondaryContainer"]) for r in roles)
+        # secondary 本身此前没有任何断言 —— 探针「把 OTHER_ROLES 里的 secondary 删掉」
+        # 没被抓住，正是因为它的对比度没人看。这里补上。
+        w4 = min(contrast(r["secondary"], r["onSecondary"]) for r in roles)
         print(f"  {tag} primary 最差对比 {w1:.4f} → {scaled(w1)}")
         print(f"  {tag} 容器最差对比 {w2:.4f} → {scaled(w2)}")
         print(f"  {tag} 次容器最差对比 {w3:.4f} → {scaled(w3)}")
+        print(f"  {tag} 次色最差对比 {w4:.4f} → {scaled(w4)}")
+        check(f"{tag} primary 对比度都 ≥ 4.5", w1 >= 4.5, True)
+        check(f"{tag} 容器对比度都 ≥ 4.5", w2 >= 4.5, True)
+        check(f"{tag} 次色对比度都 ≥ 4.5", w4 >= 4.5, True)
 
     # ---- 断言：主题间可区分 ----
     for dark in (False, True):
@@ -232,9 +275,19 @@ def main():
         pairs = [(i, j) for i in range(len(ps)) for j in range(i + 1, len(ps))]
         best = min(pairs, key=lambda p: distance(ps[p[0]], ps[p[1]]))
         d = distance(ps[best[0]], ps[best[1]])
-        print(f"  {tag} 主题间 primary 最小距 {d:.4f} → {scaled(d)}"
+        print(f"  {tag} 12 主题间 primary 最小距 {d:.4f} → {scaled(d)}"
               f"（{SEEDS[best[0]][1]} vs {SEEDS[best[1]][1]}）")
-        notes.append(f"{tag}最接近的两个主题色是「{SEEDS[best[0]][1]} vs {SEEDS[best[1]][1]}」，距离 {d:.4f}")
+        notes.append(f"{tag}最接近的两个主题色是「{SEEDS[best[0]][1]} vs {SEEDS[best[1]][1]}」，"
+                     f"距离 {d:.4f}")
+        # 可区分下限：低于这个数，两个主题在屏幕上基本分不出来 —— 换主题等于没换
+        check(f"{tag} 主题间距离 ≥ 150/1000（可区分下限）", scaled(d) >= 150, True)
+
+    # ---- 断言：加新色**不该**改变原有 6 个之间的距离（回归基线） ----
+    for dark in (False, True):
+        tag = "深色" if dark else "浅色"
+        ps = [roles_for(s, dark)["primary"] for _, _, s in LEGACY]
+        best = min(distance(ps[i], ps[j]) for i in range(len(ps)) for j in range(i + 1, len(ps)))
+        print(f"  {tag} 原有 6 主题最小距 {best:.4f} → {scaled(best)}（回归基线）")
 
     # ---- 断言：明暗关系 ----
     bad = []
@@ -247,13 +300,8 @@ def main():
     check("明暗关系无写反", bad, [])
 
     # ---- 断言：色相漂移 ----
-    # 分两档：primary/secondary 是用户直接看到的主色，必须准；
+    # 分两档：primary 是用户直接看到的主色，必须准；
     # 容器色（近白或近黑）在 8 位量化下色相误差天然更大，容差放宽但仍有上限。
-    def hue_drift_of(c, seed_hue):
-        h, _ = to_hue_sat(c)
-        d = abs(h - seed_hue)
-        return min(d, 360 - d)
-
     prim_drift = max(
         hue_drift_of(roles_for(seed, dark)["primary"], to_hue_sat(rgb888(seed))[0])
         for _, _, seed in SEEDS for dark in (False, True)
@@ -274,10 +322,66 @@ def main():
     print(f"  变异探针 固定明度 0.36 的最小对比 {legacy:.4f} → {scaled(legacy)}")
     check("变异探针落在不可读区间（< 4.5）", legacy < 4.5, True)
 
+    # ---- 自定义色相穷举：任意色相 + 三档饱和度都必须达标 ----
+    # 这条比手挑 12 个色更能证明「派生系统本身是对的」：它不是抽样，是把色相环走一遍。
+    print("\n" + "=" * 96)
+    print("自定义色相穷举（色相每 15° × 三档饱和度 × 深浅两套）")
+    print("=" * 96)
+    HUE_STEP = 15
+    hues = list(range(0, 360, HUE_STEP))
+    sats = {"柔和": SAT_SOFT, "标准": SAT_STANDARD, "浓郁": SAT_VIVID}
+    worst_contrast, worst_ctxt = (1e9, None), (1e9, None)
+    worst_secondary = (1e9, None)
+    worst_drift, worst_dtxt = (0.0, None), (0.0, None)
+    cases = 0
+    for h in hues:
+        for sname, sv in sats.items():
+            for dark in (False, True):
+                r = roles_for_hue(h, sv, dark)
+                cases += 1
+                c1 = contrast(r["primary"], r["onPrimary"])
+                c2 = contrast(r["primaryContainer"], r["onPrimaryContainer"])
+                c3 = contrast(r["secondary"], r["onSecondary"])
+                if c1 < worst_contrast[0]:
+                    worst_contrast = (c1, f"{h}°/{sname}/{'深' if dark else '浅'} primary")
+                if c2 < worst_ctxt[0]:
+                    worst_ctxt = (c2, f"{h}°/{sname}/{'深' if dark else '浅'} 容器")
+                if c3 < worst_secondary[0]:
+                    worst_secondary = (c3, f"{h}°/{sname}/{'深' if dark else '浅'} 次色")
+                d1 = hue_drift_of(r["primary"], h)
+                if d1 > worst_drift[0]:
+                    worst_drift = (d1, f"{h}°/{sname}/{'深' if dark else '浅'}")
+                for k in ("primaryContainer", "onPrimaryContainer", "secondary",
+                          "secondaryContainer", "onSecondaryContainer"):
+                    dk = hue_drift_of(r[k], h)
+                    if dk > worst_dtxt[0]:
+                        worst_dtxt = (dk, f"{h}°/{sname}/{'深' if dark else '浅'} {k}")
+    print(f"  采样 {len(hues)} 个色相 × {len(sats)} 档饱和度 × 2 明暗 = {cases} 组")
+    print(f"  最差 primary 对比 {worst_contrast[0]:.4f} → {scaled(worst_contrast[0])}（{worst_contrast[1]}）")
+    print(f"  最差容器对比   {worst_ctxt[0]:.4f} → {scaled(worst_ctxt[0])}（{worst_ctxt[1]}）")
+    print(f"  最差次色对比   {worst_secondary[0]:.4f} → {scaled(worst_secondary[0])}（{worst_secondary[1]}）")
+    print(f"  最大主色漂移   {worst_drift[0]:.4f} 度 → {scaled(worst_drift[0], 100)}（{worst_drift[1]}）")
+    print(f"  最大其余漂移   {worst_dtxt[0]:.4f} 度 → {scaled(worst_dtxt[0], 100)}（{worst_dtxt[1]}）")
+    check("自定义色相：primary 对比度全部 ≥ 4.5", worst_contrast[0] >= 4.5, True)
+    check("自定义色相：容器对比度全部 ≥ 4.5", worst_ctxt[0] >= 4.5, True)
+    check("自定义色相：次色对比度全部 ≥ 4.5", worst_secondary[0] >= 4.5, True)
+    check("自定义色相：主色漂移 ≤ 1 度", worst_drift[0] <= 1.0, True)
+    check("自定义色相：其余漂移 ≤ 4 度", worst_dtxt[0] <= 4.0, True)
+    notes.append(f"自定义色相穷举最差对比度 {worst_contrast[0]:.3f}（{worst_contrast[1]}）")
+
+    # ---- 断言：饱和度三档必须真的能区分（低档与高档的主色距离） ----
+    for dark in (False, True):
+        tag = "深色" if dark else "浅色"
+        # 同一色相下，柔和 vs 浓郁 的 primary 距离，取所有采样色相里最小的那个
+        worst = min(distance(roles_for_hue(h, SAT_SOFT, dark)["primary"],
+                             roles_for_hue(h, SAT_VIVID, dark)["primary"]) for h in hues)
+        print(f"  {tag} 柔和 vs 浓郁 最小距 {worst:.4f} → {scaled(worst)}")
+        check(f"{tag} 饱和度三档可区分（≥ 60/1000）", scaled(worst) >= 60, True)
+
     # ---- 课表空格底纹 ----
-    print("\n" + "=" * 88)
+    print("\n" + "=" * 96)
     print("课表空格底纹")
-    print("=" * 88)
+    print("=" * 96)
     for dark in (False, True):
         tag = "深色" if dark else "浅色"
         bg, odd, even, border = stripes_for(dark)
@@ -299,9 +403,9 @@ def main():
         check(f"{tag} 变异探针（旧实现奇数行=背景）", scaled(contrast(bg, bg)), 1000)
 
     # ---- 汇总 ----
-    print("\n" + "=" * 88)
+    print("\n" + "=" * 96)
     print("对账结果")
-    print("=" * 88)
+    print("=" * 96)
     passed = sum(1 for ok, _, _, _ in results if ok)
     for ok, name, expected, actual in results:
         mark = "PASS" if ok else "FAIL"

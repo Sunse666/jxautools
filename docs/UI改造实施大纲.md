@@ -223,15 +223,20 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 
 **会被打到的**：
 
-| 资产 | 影响 |
-|---|---|
-| `tools/measure_timetable_geometry.py` | 档位表变了 → 期望值要重算 |
-| `tools/measure_timetable_columns.py` | 同上（列宽档位） |
-| `tools/measure_block_fit.py` | 同上（`fitsCells` 穷举） |
-| `tools/measure_stripe_contrast.py` | 底纹色不变 → 只有坐标基准可能变 |
-| `tools/verify_theme_palette.py` | 6→12 主题 + 自定义 hue 穷举 → 要扩 |
-| `tools/verify_preferences.py` | 新增 4 个键 → 要扩 |
-| 进程内自检 19 组 520 项 | `TimetableSizeSpec`（含穷举）、`ColorThemeSpec`、`AppPreferences` 三组要重算期望值 |
+| 资产 | 影响 | P0 实际结论 |
+|---|---|---|
+| `tools/measure_timetable_geometry.py` | 档位表变了 → 期望值要重算 | **不用改**：它从截图反推 dp，不依赖档位表 |
+| `tools/measure_timetable_columns.py` | 同上（列宽档位） | **不用改**：同上 |
+| `tools/measure_block_fit.py` | 同上（`fitsCells` 穷举） | **不用改**：从截图量，不依赖档位表 |
+| `tools/measure_stripe_contrast.py` | 底纹色不变 → 只有坐标基准可能变 | **不用改**：底纹色与 `TimetableSurface` 都没动 |
+| `tools/verify_theme_palette.py` | 6→12 主题 + 自定义 hue 穷举 → 要扩 | ✅ 已扩到 32 项；**自动重算**旧 6 个的回归基线 |
+| `tools/verify_preferences.py` | 新增 4 个键 → 要扩 | ✅ 已扩；另加 §0「脚本常量 vs 源码」对齐节 |
+| 进程内自检 19 组 520 项 | `TimetableSizeSpec`（含穷举）、`ColorThemeSpec`、`JxauPalette` 三组要重算期望值 | ✅ 已重算并实跑：**263 项全绿**（新增 1 组字体链路） |
+
+> 四个像素脚本都是「打开截图 → 找连通段/量间距」，期望值来自图上的像素或
+> `TimetableSurface.kt`（底纹三层混色，本轮未动）—— 所以档位加密不影响它们；
+> 真正影响的是**截图本身的坐标基准**，而那要靠真机重新截。这比「重算期望值」省事，
+> 但也意味着它们对本轮改动的判别力有限，不能拿它们充当验收。
 
 **新增的风险点**：
 
@@ -245,26 +250,29 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 
 ## 6. 阶段划分
 
-**P0 —— 纯扩展，不动骨架（风险最低，收益最直接）**
-1. 课表宽高精细化（31/29 档 + −/+ 微调 + 数值显示）
-2. 主题色 6 → 12 预设
-3. 字号缩放 + 字族（字体链路打通）
-4. 补 `errorContainer` / `onErrorContainer`
+**P0 —— 纯扩展，不动骨架（风险最低，收益最直接）** ✅ **已落地（2026-09-22）**
+1. ✅ 课表宽高精细化（31/29 档 + −/+ 微调 + 数值显示）
+2. ✅ 主题色 6 → 12 预设
+3. ✅ 字号缩放 + 字族（字体链路打通）
+4. ✅ 补 `errorContainer` / `onErrorContainer`
+5. ✅ **自定义色相（原 P2 第 12 项，本轮提前做）** —— 拍板「先做 P0」时一并要求
+
+> 自定义色相原本放 P2，理由是它改的是 `ColorThemeSpec` 的**签名**、与 P0 撞在同一批文件里。
+> 实际做下来这个顾虑成立但不致命：`rolesFor(theme, dark, custom)` 加一个带默认值的参数，
+> 调用点不用改；真正防「造色→分解」量化往返的是另开的 `rolesForHue(hue, sat, dark)`。
+> 代价是这回一次动了 3 个文件（`Preferences` / `ColorThemeSpec` / `ProfileScreen`），
+> 好处是色相滑块与 12 个预设共用同一套派生与断言标准。见 §9-1 的验证结果。
 
 **P1 —— 控件归位（改动分散，单点都小）**
-5. `TabRow` → `PrimaryTabRow`
-6. `RadioButton` → `SegmentedButton`
-7. 布尔设置统一 `Switch`
-8. 自绘标签 → Chip
-9. 图标 outlined/filled 配对
+6. `TabRow` → `PrimaryTabRow`
+7. `RadioButton` → `SegmentedButton`
+8. 布尔设置统一 `Switch`
+9. 自绘标签 → Chip
+10. 图标 outlined/filled 配对
 
 **P2 —— 骨架层（影响面最大，单独一批）**
-10. 设置页 `SectionCard` → 分组 + `ListItem`（保留信息型卡片）
-11. `TopAppBar`（按 §1.1 的取舍方案）
-12. 自定义色相（`CUSTOM` + 色相滑块 + hue 穷举断言）
-
-> 自定义色相放 P2 不是因为难，是因为它改的是 `ColorThemeSpec` 的**签名**，
-> 与 P0 的主题色扩展撞在同一批文件里，分开做能避免一次改动动太多。
+11. 设置页 `SectionCard` → 分组 + `ListItem`（保留信息型卡片）
+12. `TopAppBar`（按 §1.1 的取舍方案）
 
 ---
 
@@ -306,15 +314,38 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 **真机测试由你执行**，我的交付物是「脚本 + 跑法说明（跑什么、看什么、判定标准、前置条件）+ 结果解读」。
 所以本方案的验收会组织成下面这样（每条都给命令与判定标准）：
 
-1. **离线可自证的部分（我自己跑）**：编译 0 错 0 警告；进程内自检全部 PASS；
-   `tools/verify_theme_palette.py`（12 主题 + hue 穷举）、`verify_preferences.py`（新键）对账通过。
+1. **离线可自证的部分（我自己跑）** —— ✅ **P0 已完成，结果如下**：
+   - 编译：`:app:compileDebugKotlin --rerun-tasks` **零 `e:` 零 `w:`**；APK 12.2 MB 正常产出。
+   - `tools/kotlin-check/run.sh`（新）→ **263 项 PASS / 0 FAIL**
+     （外观与课表尺寸 192 · 主题色派生 43 · 表面层级 12 · 字体链路 16）。
+   - `tools/kotlin-check/probe.sh`（新，变异探针）→ **20 条变异 20 条 CAUGHT**，
+     真实源码 md5 未变。这一条是「263 全绿」有意义的前提：它证明用例不是恒真的。
+   - `tools/verify_theme_palette.py` → **32/32**；`tools/verify_preferences.py` → 全部对上
+     （含新增的 §0「脚本常量 vs 源码」对齐节）。
 2. **需要真机的部分（你跑）**：
    - 主题：12 个色相 × 浅深各截一张，逐屏找"还是紫色的"漏网角色（尤其底部导航、对话框、Snackbar）
    - 字体：字号缩放 4 档各截一张，**确认课表字号不跟着变**（这是 §2.2 那条决策的正面证据）
    - 课表：最窄档（48dp）与最宽档（104dp）各截一张，确认横向滚动正常、字不撑破格子
    - 持久化：杀进程重启后设置仍在，`run-as ... cat shared_prefs/jxau_settings.xml` 与界面摘要一致
-   - 像素对账：`measure_*.py` 四个脚本重新跑一遍（期望值已在 P0 阶段重算）
+   - 像素对账：`measure_*.py` 四个脚本重新跑一遍（脚本本身不用改，但**截图要重截**）
+   - 自定义色相：滑块拖到几个色相各截一张，确认色相带高亮、预览、主界面三处一致
 3. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
+
+### 新工具：离线纯函数自检（`tools/kotlin-check/`）
+
+```bash
+bash tools/kotlin-check/run.sh     # 编译「被测源码 + 表驱动用例」并跑自检；有 FAIL 退出码 1
+bash tools/kotlin-check/probe.sh   # 变异探针：逐个改坏副本，断言自检必须报 FAIL
+```
+
+不需要 Gradle、不需要模拟器：用 Gradle 依赖缓存里已有的 `kotlin-compiler-embeddable`
+把 `Preferences.kt` / `ColorThemeSpec.kt` / `Theme.kt` / `Typography.kt` 连同
+`CheckThemePrefs.kt` 直接编成可执行程序。**它存在的理由**：这几个文件里的期望值是用
+`tools/verify_*.py` 独立算出来**抄进 Kotlin** 的，抄错一个数字不会编译报错，
+要等真机自检才暴露 —— 这里在装机之前先跑掉。
+
+探针只改 `tools/out/kotlin-check/scratch/` 下的**副本**（见 `probe.py` 顶部的事故记录），
+真实源码不会被碰；`probe.sh` 会在 Python 前后各用 `md5sum` 复核一次。
 
 ---
 

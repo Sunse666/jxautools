@@ -9,6 +9,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import cn.edu.jxau.tools.data.model.ColorTheme
+import cn.edu.jxau.tools.data.model.CustomAccent
+import cn.edu.jxau.tools.data.model.FontFamilyOption
+import cn.edu.jxau.tools.data.model.FontScale
 
 /** 两个颜色线性插值：t=0 取 a，t=1 取 b。Compose 的 Color 会把结果量化到 8 位 */
 internal fun mixColors(a: Color, b: Color, t: Float): Color = Color(
@@ -85,6 +88,30 @@ object JxauPalette {
     val DarkInverseOnSurface = DarkContainer
 
     /**
+     * 语义色：error 系四件套。
+     *
+     * ## 为什么必须显式给出，而不是靠 M3 baseline
+     * `lightColorScheme()` / `darkColorScheme()` 只覆盖传进去的角色，其余沿用 baseline。
+     * **baseline 的 error 系恰好也是红的**，所以漏掉它一直没暴露 —— 但这属于同一类隐患：
+     * 当年底部导航栏一直是未覆盖的 `surfaceContainer`（baseline 淡紫），
+     * 切任何主题都不变色，主题切换看起来「只换了一半」。
+     *
+     * 一旦 M3 升级把 baseline 的 error 配色改掉（或者哪天换了配色方案），
+     * 漏掉的角色会变成**游离在主题之外的色**。显式给出，成本四行。
+     *
+     * 值取 M3 baseline：错误是语义，不该跟着主题色相变红变橙。
+     */
+    val LightError = Color(0xFFBA1A1A)
+    val LightOnError = Color.White
+    val LightErrorContainer = Color(0xFFFFDAD6)
+    val LightOnErrorContainer = Color(0xFF410002)
+
+    val DarkError = Color(0xFFFFB4AB)
+    val DarkOnError = Color(0xFF690005)
+    val DarkErrorContainer = Color(0xFF93000A)
+    val DarkOnErrorContainer = Color(0xFFFFDAD6)
+
+    /**
      * 窗口底色。
      *
      * 单独暴露出来是为了 [cn.edu.jxau.tools.MainActivity] 能在 Compose 首帧之前
@@ -125,6 +152,30 @@ object JxauPalette {
                 true,
                 out,
             )
+
+            // ---- 语义色：文字压在自己的容器上必须可读 ----
+            // 这两条是「显式给出 error 四件套」这个决定的判据。它们不依赖 baseline 是什么，
+            // 所以即使将来 M3 换了 baseline 的 error，断言仍然守着可读性。
+            val onError = ColorThemeSpec.contrastRatio(
+                if (dark) DarkError else LightError,
+                if (dark) DarkOnError else LightOnError,
+            )
+            val onErrorContainer = ColorThemeSpec.contrastRatio(
+                if (dark) DarkErrorContainer else LightErrorContainer,
+                if (dark) DarkOnErrorContainer else LightOnErrorContainer,
+            )
+            check("$tag error 上的文字对比度 ≥ 4.5", onError >= 4.5f, true, out)
+            check("$tag errorContainer 上的文字对比度 ≥ 4.5", onErrorContainer >= 4.5f, true, out)
+            // 容错容器还要与普通背景分得开，否则「红底提示条」看不出是提示条
+            check(
+                "$tag errorContainer 与背景可区分",
+                ColorThemeSpec.contrastRatio(
+                    if (dark) DarkErrorContainer else LightErrorContainer,
+                    backgroundFor(dark),
+                ) > 1.1f,
+                true,
+                out,
+            )
         }
         return out
     }
@@ -134,15 +185,21 @@ object JxauPalette {
  * 由「主题色相 × 明暗」构造配色方案。
  *
  * 抽成非 @Composable 的纯函数：这样它能被自检直接调用（比在自检里复刻一遍配色逻辑可靠得多），
- * 也让「六个主题 × 两种明暗 = 12 套配色」是同一段代码的 12 次求值，不存在手写漏项。
+ * 也让「十三个主题 × 两种明暗 = 26 套配色」是同一段代码的 26 次求值，不存在手写漏项。
  *
  * `tertiary` 系直接复用 secondary：本应用没有用到 tertiary，
  * 显式对齐是为了**不给 baseline 的紫色留后门** —— 哪天某个组件用上了它，
  * 出现的也是主题色而不是凭空冒出的紫色。
+ *
+ * @param customAccent 只在 [theme] 是 [ColorTheme.CUSTOM] 时参与派生
  */
-fun schemeFor(theme: ColorTheme, dark: Boolean): ColorScheme {
-    val a = ColorThemeSpec.rolesFor(theme, dark)
-    val inversed = ColorThemeSpec.rolesFor(theme, !dark)
+fun schemeFor(
+    theme: ColorTheme,
+    dark: Boolean,
+    customAccent: CustomAccent = CustomAccent.DEFAULT,
+): ColorScheme {
+    val a = ColorThemeSpec.rolesFor(theme, dark, customAccent)
+    val inversed = ColorThemeSpec.rolesFor(theme, !dark, customAccent)
     return if (dark) {
         darkColorScheme(
             primary = a.primary,
@@ -158,8 +215,10 @@ fun schemeFor(theme: ColorTheme, dark: Boolean): ColorScheme {
             onTertiary = a.onSecondary,
             tertiaryContainer = a.secondaryContainer,
             onTertiaryContainer = a.onSecondaryContainer,
-            error = Color(0xFFFFB4AB),
-            onError = Color(0xFF690005),
+            error = JxauPalette.DarkError,
+            onError = JxauPalette.DarkOnError,
+            errorContainer = JxauPalette.DarkErrorContainer,
+            onErrorContainer = JxauPalette.DarkOnErrorContainer,
             background = JxauPalette.DarkBackground,
             onBackground = JxauPalette.DarkOnSurface,
             surface = JxauPalette.DarkSurface,
@@ -198,8 +257,10 @@ fun schemeFor(theme: ColorTheme, dark: Boolean): ColorScheme {
             onTertiary = a.onSecondary,
             tertiaryContainer = a.secondaryContainer,
             onTertiaryContainer = a.onSecondaryContainer,
-            error = Color(0xFFBA1A1A),
-            onError = Color.White,
+            error = JxauPalette.LightError,
+            onError = JxauPalette.LightOnError,
+            errorContainer = JxauPalette.LightErrorContainer,
+            onErrorContainer = JxauPalette.LightOnErrorContainer,
             background = JxauPalette.LightBackground,
             onBackground = JxauPalette.LightOnSurface,
             surface = JxauPalette.LightSurface,
@@ -230,13 +291,24 @@ fun schemeFor(theme: ColorTheme, dark: Boolean): ColorScheme {
 fun JxauTheme(
     theme: ColorTheme = ColorTheme.DEFAULT,
     darkTheme: Boolean = isSystemInDarkTheme(),
+    customAccent: CustomAccent = CustomAccent.DEFAULT,
+    fontScale: FontScale = FontScale.DEFAULT,
+    fontFamily: FontFamilyOption = FontFamilyOption.DEFAULT,
     content: @Composable () -> Unit,
 ) {
     // remember：切换主题才重算（派生要跑 500 步扫描 × 八个角色 × 两套明暗），
-    // 否则每次重组都会新建一个 ColorScheme 对象，白让整棵树重组一遍
-    val scheme = remember(theme, darkTheme) { schemeFor(theme, darkTheme) }
+    // 否则每次重组都会新建一个 ColorScheme 对象，白让整棵树重组一遍。
+    // ⚠️ customAccent 必须在 key 里 —— 拖色相滑块时它每帧都在变，
+    // 漏了就会出现「滑块动了、界面没动」。
+    val scheme = remember(theme, darkTheme, customAccent) {
+        schemeFor(theme, darkTheme, customAccent)
+    }
+    val typography = remember(fontFamily, fontScale) {
+        jxauTypography(fontFamily.toComposeFamily(), fontScale.value)
+    }
     MaterialTheme(
         colorScheme = scheme,
+        typography = typography,
         content = content,
     )
 }

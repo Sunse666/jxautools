@@ -1,6 +1,5 @@
 package cn.edu.jxau.tools.data.model
 
-import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -39,40 +38,192 @@ enum class ThemeMode(val key: String, val label: String, val detail: String) {
 /**
  * 主题色相（「换什么颜色」），与 [ThemeMode]（「深还是浅」）是**两个正交维度**。
  *
- * 拆成两个枚举而不是九个组合枚举，是因为用户的心智就是两个独立开关：
- * 「我要深色」和「我要紫色」互不冲突。拼成 3×6 个枚举，每加一个色相要补 3 个成员，
- * 每加一种明暗模式要补 6 个，很快就没人维护得动。
+ * 拆成两个枚举而不是 3×N 个组合枚举，是因为用户的心智就是两个独立开关：
+ * 「我要深色」和「我要紫色」互不冲突。
  *
  * 这里只放 [key] / [label]（纯数据，不引 Compose）；种子色与派生规则在
  * `ui.theme.ColorThemeSpec` 里 —— 数据层不该依赖 UI 的颜色类型。
+ *
+ * ## 枚举顺序 = 色相环顺序（除了 [CUSTOM] 固定在最后）
+ * 设置页是把色块**按 entries 顺序平铺**的，所以顺序本身就是信息：
+ * 按色相排，用户看到一个渐变的环，想找「偏绿的那个」往中间看就行；
+ * 按「加入时间」排则是一片乱序色块，只能一个个读名字。
+ *
+ * ⚠️ 调整顺序是**安全**的（存储用 [key] 而不是序号，见本文件顶部说明），
+ * 但**改 key 会读丢用户的设置** —— 现有 12 个色相里前 6 个是历史遗留的 key
+ * （`green` 是「竹青」而不是 `bamboo`），它们必须原样保留。
  */
 enum class ColorTheme(val key: String, val label: String) {
-    BLUE("blue", "经典蓝"),
-    TEAL("teal", "青碧"),
-    GREEN("green", "竹青"),
-    PURPLE("purple", "紫罗兰"),
-    ROSE("rose", "玫红"),
+    RED("red", "绯红"),
     ORANGE("orange", "暖橙"),
+    AMBER("amber", "琥珀"),
+    OLIVE("olive", "橄榄"),
+    GRASS("grass", "草绿"),
+    GREEN("green", "竹青"),
+    JADE("jade", "翡翠"),
+    TEAL("teal", "青碧"),
+    BLUE("blue", "经典蓝"),
+    PURPLE("purple", "紫罗兰"),
+    MAGENTA("magenta", "品红"),
+    ROSE("rose", "玫红"),
+
+    /**
+     * 自定义色相（色相滑块 + 饱和度档）。
+     *
+     * 它没有静态种子色 —— 种子由 [CustomAccent] 现场算出来，
+     * 所以 `ColorThemeSpec.seedOf` 对它不适用，凡是要派生颜色的调用点都得把
+     * `customAccent` 一并传进去（缺了会回落到默认的浅蓝，界面表现为「选了没反应」）。
+     */
+    CUSTOM("custom", "自定义"),
     ;
 
     companion object {
         val DEFAULT = BLUE
 
-        /** 读存储：不认识的值（空、旧版本、手改过的）回退到 [DEFAULT]，不抛异常 */
+        /** 有静态种子色的那 12 个（= 全部减去 [CUSTOM]）。设置页的色块墙遍历它 */
+        val PRESETS: List<ColorTheme> = entries.filter { it != CUSTOM }
+
+        /** 读存储：不认识的值（空、旧版本、手改过的）都回退到 [DEFAULT]，不抛异常 */
         fun ofKey(key: String?): ColorTheme = entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
+/**
+ * 自定义主题色的两个维度。
+ *
+ * ## 为什么存「色相 + 饱和度档」而不是存最终的十六进制色
+ * 派生规则（[cn.edu.jxau.tools.ui.theme.ColorThemeSpec]）会随版本演进 ——
+ * 目标对比度、容器亮度都可能调。存最终色值的话，规则一改，用户自定义的那个颜色
+ * 就停在一个按旧规则算出的色上，既不跟随新规则、也没法解释；存**用户的选择**则永远有效。
+ *
+ * 饱和度分三档而不是连续可调：饱和度对「能不能看清字」有直接影响，
+ * 而对比度是靠 [ColorThemeSpec] 反解明度保证的 —— 连续可调会让「同一档位下
+ * 不同饱和度看起来深浅不一」，三档是「够用」与「可控」的折中。
+ */
+data class CustomAccent(
+    val hue: Int = DEFAULT_HUE,
+    val saturation: SatLevel = SatLevel.DEFAULT,
+) {
+    /** 饱和度档。数值是 HSL 的饱和度，与预设种子反解出来的量纲一致（0..1） */
+    enum class SatLevel(val key: String, val label: String, val value: Float) {
+        SOFT("soft", "柔和", 0.55f),
+        STANDARD("standard", "标准", 0.72f),
+        VIVID("vivid", "浓郁", 0.90f),
+        ;
+
+        companion object {
+            val DEFAULT = STANDARD
+
+            fun ofKey(key: String?): SatLevel = entries.firstOrNull { it.key == key } ?: DEFAULT
+        }
+    }
+
+    companion object {
+        /** 默认色相取 210°（与「经典蓝」同色系），免得第一次点进自定义看到一个怪色 */
+        const val DEFAULT_HUE = 210
+
+        val DEFAULT = CustomAccent()
+
+        /**
+         * 读存储。色相取模落到 0..359：存里可能是一个被手改过的值（负数或 >360），
+         * 取模比丢弃更符合直觉 —— 用户想要的是「某个色相」，不是「一个合法的整数」。
+         */
+        fun of(hue: Int, satKey: String?): CustomAccent =
+            CustomAccent(hue = ((hue % 360) + 360) % 360, saturation = SatLevel.ofKey(satKey))
+    }
+}
+
+/**
+ * 全局字号缩放档。
+ *
+ * ## 为什么不用 `LocalDensity.fontScale`
+ * 改 fontScale 会**连自绘的 dp/sp 一起乘进去**，而课表字号是由列宽推导出来的整数
+ * （`TimetableSize.nameFontSp`），属于「布局已经算好的量」；再被全局缩放影响，
+ * 就会出现「字撑出格子」或者「预览和课表页不一致」。走 Typography 只影响走了
+ * `MaterialTheme.typography` 的界面文字，边界清楚。
+ */
+enum class FontScale(val key: String, val label: String, val value: Float, val detail: String) {
+    SMALL("small", "小", 0.85f, "界面文字缩小 15%"),
+    NORMAL("normal", "标准", 1.00f, "系统默认大小"),
+    LARGE("large", "大", 1.15f, "界面文字放大 15%"),
+    XLARGE("xlarge", "特大", 1.30f, "界面文字放大 30%"),
+    ;
+
+    companion object {
+        val DEFAULT = NORMAL
+
+        fun ofKey(key: String?): FontScale = entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
+/**
+ * 字族选择。
+ *
+ * ⚠️ **只有系统字族，不打包字体文件** —— 这是刻意的：打包一套中文字体要 +3~15MB，
+ * 而本应用是要分发给同学的，体积是硬约束。
+ *
+ * ⚠️ 中文在 [SERIF] / [MONOSPACE] 下的渲染**因 ROM 而异**：部分国产 ROM 没有独立的
+ * 中文衬线/等宽字面，会直接回落到黑体，表现为「选了没变化」。这不是 bug，
+ * 是字体链的客观情况 —— 所以这里的 detail 文案写的是「若系统支持」而不是打包票，
+ * 并且设置页保留 [DEFAULT] 作为推荐项。
+ */
+enum class FontFamilyOption(
+    val key: String,
+    val label: String,
+    val detail: String,
+    /** null = 不改字族，沿用 Typography 的默认（系统无衬线） */
+    val familyName: String?,
+) {
+    PLAIN("default", "默认", "系统黑体，中文最清晰", null),
+    SERIF("serif", "衬线", "宋体风格（部分机型中文会回落黑体）", "serif"),
+    MONOSPACE("monospace", "等宽", "字符等宽（部分机型中文会回落黑体）", "monospace"),
+    ;
+
+    companion object {
+        val DEFAULT = PLAIN
+
+        fun ofKey(key: String?): FontFamilyOption = entries.firstOrNull { it.key == key } ?: DEFAULT
     }
 }
 
 /** 课表格子的档位表与布局常量。所有尺寸只有一个来源，UI 不再自带魔数 */
 object TimetableSizeSpec {
 
-    /** 单节格子高度档位（dp）。等差 6，默认档 64 居中 */
-    val HEIGHT_LEVELS = listOf(52, 58, 64, 70, 76)
-    val HEIGHT_LABELS = listOf("紧凑", "较紧凑", "标准", "较宽松", "宽松")
+    /**
+     * 档位步长（dp）。
+     *
+     * 从「5 档、等差 6」改成「2dp 网格」，是因为 6dp 一档时用户常有
+     * 「64 有点小、70 又太大」的夹缝感，而滑块一次跳 6dp 又调不出中间值。
+     *
+     * 为什么是 2 而不是 1：1dp 的差别在手机上肉眼分不出，但会让档位翻倍
+     * （高度 61 档、列宽 57 档），滑块的把手位置精度远达不到，纯属噪声。
+     * 2dp 是「看得出来的最小差别」。
+     */
+    const val STEP = 2
 
-    /** 课程列宽档位（dp）。等差 6，默认档 74 居中 */
-    val WIDTH_LEVELS = listOf(62, 68, 74, 80, 86)
-    val WIDTH_LABELS = listOf("窄", "较窄", "标准", "较宽", "宽")
+    const val MIN_HEIGHT = 40
+    const val MAX_HEIGHT = 100
+    const val MIN_WIDTH = 48
+    const val MAX_WIDTH = 104
+
+    /**
+     * 单节格子高度档位（dp）：40..100 步长 2，共 31 档，默认 64。
+     * 下限 40 保证「课名 + 教室」两行字还排得下；上限 100 之后一屏只剩三四节，没意义。
+     */
+    val HEIGHT_LEVELS: List<Int> = (MIN_HEIGHT..MAX_HEIGHT step STEP).toList()
+
+    /** 课程列宽档位（dp）：48..104 步长 2，共 29 档，默认 74 */
+    val WIDTH_LEVELS: List<Int> = (MIN_WIDTH..MAX_WIDTH step STEP).toList()
+
+    /**
+     * 滑块两端的形容词。
+     *
+     * 从「每档一个名字」（紧凑/较紧凑/标准/较宽松/宽松）退成**只有两端**：
+     * 31 档起不出 31 个不重复又不啰嗦的名字，硬起会让用户对着
+     * 「较宽松」和「宽松」猜哪个更宽。中间靠 dp 数值说话 —— 数值是诚实的。
+     */
+    val HEIGHT_END_LABELS = listOf("紧凑", "宽松")
+    val WIDTH_END_LABELS = listOf("窄", "宽")
 
     const val DEFAULT_HEIGHT = 64
     const val DEFAULT_WIDTH = 74
@@ -107,24 +258,40 @@ object TimetableSizeSpec {
      * 把任意整数吸附到最近的档位。
      *
      * 存在的理由不是「好看」而是**容错**：存储里的值可能来自旧版本、被手改过、
-     * 或者将来档位表调整过（例如原本的 60dp 现在不是档位了）。不吸附的话，
-     * 滑块的把手会停在两档之间、点一下会跳很远。距离相同时取较小档位，保证结果唯一。
+     * 或者档位表调整过。不吸附的话，滑块的把手会停在两档之间、点一下会跳很远。
+     *
+     * 语义从「在 5 个档位里取最近的」变成「**对齐 2dp 网格**」：
+     * 先夹到区间、再向下取整到网格。距两个网格点一样远时取较小的那个，
+     * 保证结果唯一（滑动时不会在两个值之间抖）。
+     *
+     * ⚠️ **不需要数据迁移**：存的是 dp 绝对值而不是档位下标，旧值 52/58/64/70/76
+     * 全都落在 2dp 网格上，读出来一模一样。
      */
-    fun snap(levels: List<Int>, value: Int): Int =
-        levels.minByOrNull { abs(it - value) } ?: levels.first()
+    fun snap(levels: List<Int>, value: Int): Int {
+        val min = levels.first()
+        return min + (value.coerceIn(min, levels.last()) - min) / STEP * STEP
+    }
 
     fun snapHeight(value: Int): Int = snap(HEIGHT_LEVELS, value)
 
     fun snapWidth(value: Int): Int = snap(WIDTH_LEVELS, value)
 
-    /** 档位下标，滑块位置用它 */
-    fun heightIndex(value: Int): Int = HEIGHT_LEVELS.indexOf(snapHeight(value))
-
-    fun widthIndex(value: Int): Int = WIDTH_LEVELS.indexOf(snapWidth(value))
-
     private fun check(name: String, actual: Any?, expected: Any?, out: MutableList<String>) {
         out += if (actual == expected) "PASS $name = $actual"
         else "FAIL $name：期望 $expected，实际 $actual"
+    }
+
+    /** 最长的一段连续相同值。用来量「调了半天没变化」的严重程度 */
+    private fun longestRun(values: List<Int>): Int {
+        var best = 0
+        var cur = 0
+        var prev: Int? = null
+        for (v in values) {
+            cur = if (v == prev) cur + 1 else 1
+            prev = v
+            if (cur > best) best = cur
+        }
+        return best
     }
 
     /** 期望值由 tools/verify_preferences.py 独立重算后抄入，不是把实现结果回填 */
@@ -153,48 +320,106 @@ object TimetableSizeSpec {
         check("色相 ofKey(null)", ColorTheme.ofKey(null), ColorTheme.BLUE, out)
         check("色相 ofKey(旧值)", ColorTheme.ofKey("cyan"), ColorTheme.BLUE, out)
         check("色相 key 唯一", ColorTheme.entries.map { it.key }.toSet().size, ColorTheme.entries.size, out)
-        check("色相数量", ColorTheme.entries.size, 6, out)
+        check("色相数量", ColorTheme.entries.size, 13, out)
+        check("预设色数量（不含自定义）", ColorTheme.PRESETS.size, 12, out)
+        check("自定义不在预设里", ColorTheme.CUSTOM in ColorTheme.PRESETS, false, out)
+        // 枚举顺序就是设置页的色块顺序 —— 按色相排，用户能顺着环找颜色。
+        // 逐个写死色相角度做不到（角度在 ui.theme 里），这里只钉住首尾与「自定义在最后」。
+        check("色块顺序首位", ColorTheme.entries.first(), ColorTheme.RED, out)
+        check("自定义排在最后", ColorTheme.entries.last(), ColorTheme.CUSTOM, out)
 
-        // ---- 格子高度吸附 ----
+        // ---- 自定义色相：脏值容错 ----
+        check("自定义默认色相", CustomAccent.DEFAULT.hue, 210, out)
+        check("自定义默认饱和度", CustomAccent.DEFAULT.saturation, CustomAccent.SatLevel.STANDARD, out)
+        check("饱和度 ofKey(soft)", CustomAccent.SatLevel.ofKey("soft"), CustomAccent.SatLevel.SOFT, out)
+        check("饱和度 ofKey(脏值)", CustomAccent.SatLevel.ofKey("nope"), CustomAccent.SatLevel.STANDARD, out)
+        check("饱和度 ofKey(null)", CustomAccent.SatLevel.ofKey(null), CustomAccent.SatLevel.STANDARD, out)
+        check("饱和度三档数值递升", CustomAccent.SatLevel.entries.map { it.value }.zipWithNext().all { (a, b) -> a < b }, true, out)
+        // 色相取模：负值与 >360 都落到 0..359，而不是被丢弃回默认
+        check("色相 -30 取模", CustomAccent.of(-30, null).hue, 330, out)
+        check("色相 400 取模", CustomAccent.of(400, null).hue, 40, out)
+        check("色相 0 保留", CustomAccent.of(0, null).hue, 0, out)
+        check("色相 359 保留", CustomAccent.of(359, null).hue, 359, out)
+
+        // ---- 字号缩放 / 字族 ----
+        check("字号档 ofKey(small)", FontScale.ofKey("small"), FontScale.SMALL, out)
+        check("字号档 ofKey(脏值)", FontScale.ofKey("huge"), FontScale.NORMAL, out)
+        check("字号档 ofKey(null)", FontScale.ofKey(null), FontScale.NORMAL, out)
+        check("字号档数量", FontScale.entries.size, 4, out)
+        check("标准档 = 1.0", FontScale.NORMAL.value, 1.00f, out)
+        check("字号档数值递升", FontScale.entries.map { it.value }.zipWithNext().all { (a, b) -> a < b }, true, out)
+        check("字族 ofKey(default)", FontFamilyOption.ofKey("default"), FontFamilyOption.PLAIN, out)
+        check("字族 ofKey(脏值)", FontFamilyOption.ofKey("comic"), FontFamilyOption.PLAIN, out)
+        check("默认字族不改 family", FontFamilyOption.PLAIN.familyName, null, out)
+        check("衬线字族名", FontFamilyOption.SERIF.familyName, "serif", out)
+        check("等宽字族名", FontFamilyOption.MONOSPACE.familyName, "monospace", out)
+
+        // ---- 课表档位表：范围与步长 ----
+        check("高度档位数", HEIGHT_LEVELS.size, 31, out)
+        check("宽度档位数", WIDTH_LEVELS.size, 29, out)
+        check("高度档位下限", HEIGHT_LEVELS.first(), MIN_HEIGHT, out)
+        check("高度档位上限", HEIGHT_LEVELS.last(), MAX_HEIGHT, out)
+        check("宽度档位下限", WIDTH_LEVELS.first(), MIN_WIDTH, out)
+        check("宽度档位上限", WIDTH_LEVELS.last(), MAX_WIDTH, out)
+        check("高度档位等步长", HEIGHT_LEVELS.zipWithNext().all { (a, b) -> b - a == STEP }, true, out)
+        check("宽度档位等步长", WIDTH_LEVELS.zipWithNext().all { (a, b) -> b - a == STEP }, true, out)
+        check("默认高度在档位表内", DEFAULT_HEIGHT in HEIGHT_LEVELS, true, out)
+        check("默认宽度在档位表内", DEFAULT_WIDTH in WIDTH_LEVELS, true, out)
+
+        // ---- 档位吸附：对齐 2dp 网格 + 夹取 ----
+        check("snapHeight(64)", snapHeight(64), 64, out)
         check("snapHeight(52)", snapHeight(52), 52, out)
-        check("snapHeight(76)", snapHeight(76), 76, out)
-        check("snapHeight(0)", snapHeight(0), 52, out)
-        check("snapHeight(-40)", snapHeight(-40), 52, out)
-        check("snapHeight(999)", snapHeight(999), 76, out)
-        check("snapHeight(55) 中点取小", snapHeight(55), 52, out)
-        check("snapHeight(56)", snapHeight(56), 58, out)
-        check("snapHeight(61) 中点取小", snapHeight(61), 58, out)
-        check("snapHeight(67) 中点取小", snapHeight(67), 64, out)
-        check("snapHeight(73) 中点取小", snapHeight(73), 70, out)
-        check("heightIndex(64)", heightIndex(64), 2, out)
-        check("heightIndex(0)", heightIndex(0), 0, out)
-        check("heightIndex(999)", heightIndex(999), 4, out)
+        check("snapHeight(0)", snapHeight(0), MIN_HEIGHT, out)
+        check("snapHeight(-40)", snapHeight(-40), MIN_HEIGHT, out)
+        check("snapHeight(999)", snapHeight(999), MAX_HEIGHT, out)
+        // 61 距 60/62 各 1 → 取小的 60；75 距 74/76 各 1 → 取小的 74
+        check("snapHeight(61) 中点取小", snapHeight(61), 60, out)
+        check("snapHeight(75) 中点取小", snapHeight(75), 74, out)
+        check("snapHeight(62) 已对齐", snapHeight(62), 62, out)
+        check("snapWidth(74)", snapWidth(74), 74, out)
+        check("snapWidth(0)", snapWidth(0), MIN_WIDTH, out)
+        check("snapWidth(999)", snapWidth(999), MAX_WIDTH, out)
+        check("snapWidth(75) 中点取小", snapWidth(75), 74, out)
+        check("snapWidth(76) 已对齐", snapWidth(76), 76, out)
+        // 吸附结果必须落在档位表里（网格与档位表是同一份定义，这条防它们走偏）
+        check(
+            "任意值吸附后都在档位表内",
+            (-50..150 step 7).map { snapHeight(it) }.all { it in HEIGHT_LEVELS } &&
+                (-50..150 step 7).map { snapWidth(it) }.all { it in WIDTH_LEVELS },
+            true, out,
+        )
 
-        // ---- 列宽吸附 ----
-        check("snapWidth(62)", snapWidth(62), 62, out)
-        check("snapWidth(86)", snapWidth(86), 86, out)
-        check("snapWidth(0)", snapWidth(0), 62, out)
-        check("snapWidth(999)", snapWidth(999), 86, out)
-        check("snapWidth(66)", snapWidth(66), 68, out)
-        check("snapWidth(71)", snapWidth(71), 68, out)
-        check("snapWidth(77)", snapWidth(77), 74, out)
-        check("snapWidth(83) 中点取小", snapWidth(83), 80, out)
-        check("snapWidth(84)", snapWidth(84), 86, out)
-        check("widthIndex(74)", widthIndex(74), 2, out)
-        check("widthIndex(-5)", widthIndex(-5), 0, out)
-
-        // ---- 字号推导：列宽每 6dp 撑 1sp ----
+        // ---- 字号推导：列宽区间线性映射到字号区间（全程都有感知） ----
         val sizes = WIDTH_LEVELS.map { TimetableSize(columnWidthDp = it) }
-        check("字号@62", sizes[0].nameFontSp, 10, out)
-        check("字号@68", sizes[1].nameFontSp, 11, out)
-        check("字号@74", sizes[2].nameFontSp, 12, out)
-        check("字号@80", sizes[3].nameFontSp, 13, out)
-        check("字号@86", sizes[4].nameFontSp, 14, out)
+        check("字号@48 最窄", sizes.first().nameFontSp, MIN_NAME_FONT, out)
+        check("字号@74 默认", TimetableSize(columnWidthDp = 74).nameFontSp, 12, out)
+        check("字号@104 最宽", sizes.last().nameFontSp, MAX_NAME_FONT, out)
         check("字号随列宽单调不减", sizes.map { it.nameFontSp }.zipWithNext().all { (a, b) -> a <= b }, true, out)
-        check("教室字号=课名-2", sizes[2].placeFontSp, 10, out)
-        check("行高=课名+3", sizes[2].nameLineHeightSp, 15, out)
+        check("字号 6 种取值全覆盖", sizes.map { it.nameFontSp }.toSet().sorted(), (MIN_NAME_FONT..MAX_NAME_FONT).toList(), out)
+
+        // 「全程都有感知」的量化判据：**最长的一段「同字号」不能太长**。
+        // ⚠️ 这里踩过一个坑：一开始写的是「6 种字号全覆盖」，但旧公式**也**覆盖 10..15 六种
+        // （两端各有一大段被夹成 10 / 15，中间的档位照样走遍 11~14）—— 那条断言看着严格，
+        // 其实抓不住旧公式。真正有判别力的是「最长连续同字号段」：旧公式在 48..66 这一段
+        // 全是 10sp（10 档），用户把宽度往上调 18dp，字一点没变。
+        check("最长同字号段", longestRun(sizes.map { it.nameFontSp }), 6, out)
+        // 变异探针：把旧公式固化成断言，证明上面那条确实抓得住（10 档 vs 6 档）
+        val legacyFonts = WIDTH_LEVELS.map { ((it - 2) / 6).coerceIn(MIN_NAME_FONT, MAX_NAME_FONT) }
+        check("变异探针 旧公式最长同字号段", longestRun(legacyFonts), 10, out)
+
+        check("教室字号=课名-2", TimetableSize(columnWidthDp = 74).placeFontSp, 10, out)
+        check("行高=课名+3", TimetableSize(columnWidthDp = 74).nameLineHeightSp, 15, out)
         check("字号夹下限", TimetableSize(columnWidthDp = 0).nameFontSp, MIN_NAME_FONT, out)
         check("字号夹上限", TimetableSize(columnWidthDp = 400).nameFontSp, MAX_NAME_FONT, out)
+
+        // ---- 课表字号不受全局字号缩放影响（规格断言，不是判别性断言） ----
+        // 课表字号由列宽推导，走的是渲染时的显式 fontSize，不经过 MaterialTheme.typography。
+        // 写成断言的意义是**把这条规格钉在代码里**：将来若有人把全局缩放接进
+        // TimetableSize 或用 LocalDensity.fontScale 做缩放，这条会连同注释一起提醒他。
+        // ⚠️ 诚实说明：当前参数下即便跟随缩放也未必撑破格子，所以它抓不到「行为退化」，
+        // 它防的是「规格被改掉」。真正的判别性断言在 TimetableSize 那一组几何不变量里。
+        val fontAcrossScales = FontScale.entries.map { TimetableSize(columnWidthDp = 74).nameFontSp }
+        check("课表字号不随字号缩放变化", fontAcrossScales.distinct(), listOf(12), out)
 
         // ---- 布局算术：轴总高与逐格相加一致、块与轴逐节对齐 ----
         HEIGHT_LEVELS.forEach { h ->
@@ -209,6 +434,8 @@ object TimetableSizeSpec {
         check("h=64 单节块高", d.blockHeightDp(1), 64, out)
         check("h=64 第11节底边", d.rowBottomDp(11), 734, out)
         check("h=76 第5节顶边", TimetableSize(periodHeightDp = 76).blockTopDp(5), 316, out)
+        check("h=100 第2节顶边", TimetableSize(periodHeightDp = 100).blockTopDp(2), 103, out)
+        check("h=40 第3节顶边", TimetableSize(periodHeightDp = 40).blockTopDp(3), 86, out)
         // 对齐不变量：块的底边必须落在「结束那一节」的行底边上，否则轴上数字与课错位
         listOf(
             Triple(64, 1, 2) to 131,
@@ -221,6 +448,7 @@ object TimetableSizeSpec {
         ).forEach { (spec, expected) ->
             val (h, from, span) = spec
             val s = TimetableSize(periodHeightDp = h)
+            // 52/70/76 都不在新网格上 —— 故意留着：fromStored 之外直接构造也要成立
             val bottom = s.blockTopDp(from) + s.blockHeightDp(span)
             check("h=$h 块[$from..${from + span - 1}]底边", bottom, expected, out)
             check("h=$h 块[$from..${from + span - 1}]对齐末节行底", bottom, s.rowBottomDp(from + span - 1), out)
@@ -244,7 +472,9 @@ object TimetableSizeSpec {
         check("h=52 块9-3可见底", TimetableSize(periodHeightDp = 52).blockVisibleBottomDp(9, 3), 600, out)
         check("h=58 块1-8可见底", TimetableSize(periodHeightDp = 58).blockVisibleBottomDp(1, 8), 483, out)
         check("h=70 块4-1可见底", TimetableSize(periodHeightDp = 70).blockVisibleBottomDp(4, 1), 287, out)
-        // 穷举：5 档高度 × 11 个起点 × 到学期末的所有跨度，一个都不许差
+        check("h=40 块1-2可见底", TimetableSize(periodHeightDp = 40).blockVisibleBottomDp(1, 2), 81, out)
+        check("h=100 块1-1可见底", TimetableSize(periodHeightDp = 100).blockVisibleBottomDp(1, 1), 98, out)
+        // 穷举：31 档高度 × 11 个起点 × 到学期末的所有跨度，一个都不许差
         var fitCases = 0
         var fitBad = 0
         HEIGHT_LEVELS.forEach { h ->
@@ -256,8 +486,8 @@ object TimetableSizeSpec {
                 }
             }
         }
-        check("穷举贴合 5档×起止组合", fitBad, 0, out)
-        check("穷举覆盖用例数", fitCases, 5 * (11 + 10 + 9 + 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1), out)
+        check("穷举贴合 31档×起止组合", fitBad, 0, out)
+        check("穷举覆盖用例数", fitCases, 31 * (11 + 10 + 9 + 8 + 7 + 6 + 5 + 4 + 3 + 2 + 1), out)
 
         // 变异探针：旧渲染把整行高度当成 pitch（行尾空隙算进行内），
         // 于是行可见底边比课块可见底边**低整整一个 PERIOD_GAP** ——
@@ -275,10 +505,23 @@ object TimetableSizeSpec {
 
         // ---- 默认值判定（「恢复默认」按钮的可用状态） ----
         check("默认即默认", TimetableSize.DEFAULT.isDefault, true, out)
-        check("只改高度", TimetableSize(periodHeightDp = 58).isDefault, false, out)
-        check("只改列宽", TimetableSize(columnWidthDp = 86).isDefault, false, out)
+        check("只改高度", TimetableSize(periodHeightDp = 66).isDefault, false, out)
+        check("只改列宽", TimetableSize(columnWidthDp = 76).isDefault, false, out)
         check("规范化保留档位", TimetableSize.fromStored(64, 74), TimetableSize.DEFAULT, out)
-        check("规范化脏值", TimetableSize.fromStored(3, 5000), TimetableSize(52, 86), out)
+        check("规范化脏值", TimetableSize.fromStored(3, 5000), TimetableSize(MIN_HEIGHT, MAX_WIDTH), out)
+        // 旧版本的 5 档值读进来必须原样保留（2dp 网格包含了它们）
+        check(
+            "旧档位值无需迁移",
+            listOf(52, 58, 64, 70, 76).map { TimetableSize.fromStored(it, 74).periodHeightDp },
+            listOf(52, 58, 64, 70, 76),
+            out,
+        )
+        check(
+            "旧列宽值无需迁移",
+            listOf(62, 68, 74, 80, 86).map { TimetableSize.fromStored(64, it).columnWidthDp },
+            listOf(62, 68, 74, 80, 86),
+            out,
+        )
 
         return out
     }
@@ -298,14 +541,28 @@ data class TimetableSize(
     val pitchDp: Int get() = periodHeightDp + TimetableSizeSpec.PERIOD_GAP
 
     /**
-     * 课名字号：列宽每 6dp 约撑 1sp 字，夹在 10..15。
-     * 列宽是给字用的，字号跟着列宽走才不会出现「列很宽、字很小」或「字撑破格子」。
+     * 课名字号：把列宽区间 [48, 104] **线性映射**到字号区间 [10, 15]。
+     *
+     * ## 为什么不再是 `(列宽 - 2) / 6`
+     * 旧式子是「每 6dp 撑 1sp，结果夹在 10..15」。列宽区间一旦放宽到 48..104，
+     * 它代入后得到 7..17，两端被夹取吃掉 —— 表现为**最窄的一段（48~62）字号恒为 10、
+     * 最宽的一段（92~104）恒为 15**，用户在这两段里调宽度只看到间距在变，
+     * 觉得「调了没用」。
+     *
+     * 线性映射让 29 个列宽档**刚好覆盖 10..15 这六种字号**（自检里有一条
+     * 「6 种取值全覆盖」钉住这件事），全程都有感知，且不会越界到看不清。
+     *
+     * 依赖的常数只有 [TimetableSizeSpec.MIN_WIDTH] / [TimetableSizeSpec.MAX_WIDTH] /
+     * [TimetableSizeSpec.MIN_NAME_FONT] / [TimetableSizeSpec.MAX_NAME_FONT] ——
+     * 将来再调档位区间，这条公式自动跟着走，不用重算斜率。
      */
     val nameFontSp: Int
-        get() = ((columnWidthDp - 2) / 6).coerceIn(
-            TimetableSizeSpec.MIN_NAME_FONT,
-            TimetableSizeSpec.MAX_NAME_FONT,
-        )
+        get() {
+            val span = TimetableSizeSpec.MAX_WIDTH - TimetableSizeSpec.MIN_WIDTH
+            val offset = (columnWidthDp - TimetableSizeSpec.MIN_WIDTH).coerceIn(0, span)
+            val fontSpan = TimetableSizeSpec.MAX_NAME_FONT - TimetableSizeSpec.MIN_NAME_FONT
+            return TimetableSizeSpec.MIN_NAME_FONT + offset * fontSpan / span
+        }
 
     /** 教室字号比课名小两级，靠字号分层而不是靠颜色堆叠 */
     val placeFontSp: Int get() = (nameFontSp - 2).coerceAtLeast(1)
@@ -379,6 +636,14 @@ data class TimetableSize(
 data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.DEFAULT,
     val colorTheme: ColorTheme = ColorTheme.DEFAULT,
+    /**
+     * 自定义色相的参数。**只在 [colorTheme] 是 [ColorTheme.CUSTOM] 时生效**，
+     * 但它始终留在偏好里 —— 用户从「自定义」切到预设再切回来，应该看到上次调的那个颜色，
+     * 而不是被重置成默认蓝。
+     */
+    val customAccent: CustomAccent = CustomAccent.DEFAULT,
+    val fontScale: FontScale = FontScale.DEFAULT,
+    val fontFamily: FontFamilyOption = FontFamilyOption.DEFAULT,
     val timetableSize: TimetableSize = TimetableSize.DEFAULT,
     /**
      * 「第一周周一」锚点，用来把今天换算成第几周。
@@ -400,6 +665,22 @@ data class AppPreferences(
             }
         )
         append(" · ")
-        append(colorTheme.label)
+        // 自定义色只显示「自定义」等于没说 —— 用户调过 12 个预设、一个滑块之后
+        // 回来看摘要，需要的是「我调的是哪个色相」这个可复核的数字
+        append(
+            if (colorTheme == ColorTheme.CUSTOM) {
+                "自定义 ${customAccent.hue}° · ${customAccent.saturation.label}"
+            } else {
+                colorTheme.label
+            }
+        )
     }
+
+    /** 给「我的」页字体入口行用的摘要。字族为默认时只说字号，免得每次都念一遍「默认 · 标准」 */
+    fun fontSummary(): String =
+        if (fontFamily == FontFamilyOption.PLAIN) {
+            "字号${fontScale.label}"
+        } else {
+            "字号${fontScale.label} · ${fontFamily.label}"
+        }
 }

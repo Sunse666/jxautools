@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,13 +42,18 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,7 +77,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.core.SelfTest
 import cn.edu.jxau.tools.data.model.Channel
+import cn.edu.jxau.tools.data.model.ColorTheme
 import cn.edu.jxau.tools.data.model.CourseSlot
+import cn.edu.jxau.tools.data.model.CustomAccent
+import cn.edu.jxau.tools.data.model.FontFamilyOption
+import cn.edu.jxau.tools.data.model.FontScale
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableGrid
@@ -97,6 +108,22 @@ private const val APP_VERSION = "0.1.0"
  * 而切掉的那一节恰恰是用户想确认的东西。
  */
 private const val PREVIEW_PERIODS = 4
+
+/**
+ * 主题色块墙的列数。
+ *
+ * 12 个色块排成 6 列 × 2 行：一行放下 12 个需要 456dp（38dp × 12），超过常见 360dp 屏宽，
+ * 而 6 列时每列约 55dp，刚好容得下 36dp 的色块加标签。
+ */
+private const val SWATCH_COLUMNS = 6
+
+/**
+ * 色相带的分段步长（度）：36 段。
+ *
+ * 取 10 度是「点得准」（每段约 9dp 宽，超过最小可点尺寸）与「看起来像连续渐变」的折中。
+ * 再细就点不准，再粗就一眼看出是分档而不是渐变。
+ */
+private const val HUE_BAND_STEP = 10
 
 /**
  * 「我的」页：**设置中枢**。
@@ -130,6 +157,7 @@ private enum class ProfilePage(val title: String, val icon: ImageVector) {
 
     // ---- 设置 ----
     Appearance("外观主题", Icons.Filled.Settings),
+    Font("字体", Icons.Filled.Create),
     Timetable("课表显示", Icons.Filled.DateRange),
     WeekAnchor("周次校准", Icons.Filled.Edit),
 
@@ -214,6 +242,12 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
                 summary = prefs.themeSummary(systemDark),
                 onOpen = onOpen,
                 showDivider = false,
+            )
+            NavRow(
+                page = ProfilePage.Font,
+                title = "字体",
+                summary = prefs.fontSummary(),
+                onOpen = onOpen,
             )
             NavRow(
                 page = ProfilePage.Timetable,
@@ -302,6 +336,7 @@ private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBac
         ProfilePage.Advisor -> AdvisorScreen(onBack = onBack)
         ProfilePage.TermPlan -> PlanScreen(onBack = onBack)
         ProfilePage.Appearance -> AppearancePage(viewModel, onBack)
+        ProfilePage.Font -> FontPage(viewModel, onBack)
         ProfilePage.Timetable -> TimetableSizePage(viewModel, onBack)
         ProfilePage.WeekAnchor -> WeekAnchorPage(viewModel, onBack)
         ProfilePage.Session -> SessionPage(viewModel, onBack)
@@ -386,86 +421,351 @@ private fun AppearancePage(viewModel: ProfileViewModel, onBack: () -> Unit) {
 
         SectionCard("主题色") {
             // 色块画的是**当前明暗下派生出来的真实主色**（不是种子色）：
-            // 种子是饱和原色，浅色主题里主色会被压到相对亮度 0.145 才能让白字看清，
-            // 直接画种子色会让人选完发现「跟刚才看到的不一样」。
-            // 派生一次 6 个主题 = 上千次二分迭代，按明暗缓存，别每次重组都重算。
+            // 种子是饱和原色（有的还是荧光色），浅色主题里主色会被压到相对亮度 0.145
+            // 才能让白字看清，直接画种子色会让人选完发现「跟刚才看到的不一样」。
+            // 12 个主题一次派生 = 上万次明度扫描，按明暗缓存，别每次重组都重算。
             val swatches = remember(effectiveDark) {
-                ColorThemeSpec.allSeeds().map { (theme, _) -> theme to ColorThemeSpec.rolesFor(theme, effectiveDark) }
+                ColorTheme.PRESETS.map { theme -> theme to ColorThemeSpec.rolesFor(theme, effectiveDark) }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                swatches.forEach { (theme, roles) ->
-                    val selected = theme == prefs.colorTheme
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { viewModel.setColorTheme(theme) }
-                            .padding(horizontal = 2.dp, vertical = 4.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(roles.primary)
-                                .then(
-                                    if (selected) {
-                                        Modifier.border(
-                                            width = 2.dp,
-                                            color = MaterialTheme.colorScheme.onBackground,
-                                            shape = CircleShape,
-                                        )
-                                    } else {
-                                        Modifier
-                                    },
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (selected) {
-                                // 勾的颜色用 onPrimary：它是与 primary 成对推出来的，
-                                // 对比度由 ColorThemeSpec 的自检保证（六个主题里最差 5.3:1）
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = null,
-                                    tint = roles.onPrimary,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
+            // 12 个色块一行放不下（38dp × 12 = 456dp > 常见 360dp 屏宽），排成 6 列 × 2 行：
+            // 既满足「一眼看到全部」，也不引入需要横向滚动的容器。
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                swatches.chunked(SWATCH_COLUMNS).forEach { rowThemes ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        rowThemes.forEach { (theme, roles) ->
+                            ThemeSwatch(
+                                label = theme.label,
+                                color = roles.primary,
+                                onColor = roles.onPrimary,
+                                selected = theme == prefs.colorTheme,
+                                onClick = { viewModel.setColorTheme(theme) },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
-                        Spacer(Modifier.height(5.dp))
-                        Text(
-                            theme.label,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            color = if (selected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
+                        // 最后一行不满时补空位，保证各列色块纵向对齐（12 = 6×2 时用不到，
+                        // 但将来加减主题就会用到 —— 留在这里免得那时才发现错位）
+                        repeat(SWATCH_COLUMNS - rowThemes.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
-                "六个主题色各自都有浅色与深色两套配色，与上面的明暗模式自由组合——" +
+                "十二个色相按色彩环排列，每个都有浅色与深色两套配色，与上面的明暗模式自由组合——" +
                     "比如「深色 + 紫罗兰」或「浅色 + 暖橙」。选完立即生效并保存。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
+        CustomHueSection(
+            accent = prefs.customAccent,
+            active = prefs.colorTheme == ColorTheme.CUSTOM,
+            dark = effectiveDark,
+            onActivate = { viewModel.setColorTheme(ColorTheme.CUSTOM) },
+            onHue = viewModel::setCustomHue,
+            onSaturation = viewModel::setCustomSaturation,
+        )
+
         SectionCard("当前状态") {
             InfoRow("配色模式", prefs.themeMode.label)
-            InfoRow("主题色", prefs.colorTheme.label)
+            InfoRow(
+                "主题色",
+                if (prefs.colorTheme == ColorTheme.CUSTOM) {
+                    "自定义（色相 ${prefs.customAccent.hue}° · ${prefs.customAccent.saturation.label}）"
+                } else {
+                    prefs.colorTheme.label
+                },
+            )
             InfoRow("系统", if (systemDark) "深色" else "浅色")
             InfoRow("实际生效", if (effectiveDark) "深色配色" else "浅色配色")
             Spacer(Modifier.height(6.dp))
             Text(
                 "选择后立即生效并保存到本机，下次启动仍是这个主题。深色模式下课表课程块会换成深底浅字，" +
                     "避免浅底卡片贴在深色界面上刺眼。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 单个主题色块。抽成组件是因为**12 个色块要写两遍排版**（两行），
+ * 内联的话色块尺寸、选中边框、标签颜色会在两处各写一份，改一处漏一处。
+ */
+@Composable
+private fun ThemeSwatch(
+    label: String,
+    color: Color,
+    onColor: Color,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(color)
+                .then(
+                    if (selected) {
+                        Modifier.border(2.dp, MaterialTheme.colorScheme.onBackground, CircleShape)
+                    } else {
+                        Modifier
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                // 勾的颜色用 onPrimary：它是与 primary 成对推出来的，
+                // 对比度由 ColorThemeSpec 的自检保证（12 个主题里最差 5.3:1）
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = onColor,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            label,
+            fontSize = 10.sp,
+            maxLines = 1,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * 自定义色相：色相带 + 滑块 + 饱和度三档。
+ *
+ * ## 为什么既有「色相带」又有「滑块」
+ * 色相带负责**一眼看全**（36 段一次铺开，点哪段是哪段），滑块负责**精细**（0..359 连续）。
+ * 只有滑块的话，用户拖之前不知道会变成什么色，只能盯着预览点来回试；
+ * 只有色相带的话，最多精确到 10 度。两者互补，代价是这一段代码稍长。
+ *
+ * ## 为什么色相带画的不是「纯色渐变」而是派生后的 primary
+ * 纯色渐变（`hsl(deg, 1.0, 0.5)`）好看但与真实结果不符 —— 派生会把明度反解到统一目标亮度，
+ * 所以真实的 primary 比纯色暗得多。画纯色渐变，用户点完会发现「跟刚才看到的不是一个色」。
+ * 代价是 36 段要派生 36 次，所以必须 remember（拖滑块时色相变了但带子不变）。
+ */
+@Composable
+private fun CustomHueSection(
+    accent: CustomAccent,
+    active: Boolean,
+    dark: Boolean,
+    onActivate: () -> Unit,
+    onHue: (Int) -> Unit,
+    onSaturation: (CustomAccent.SatLevel) -> Unit,
+) {
+    val roles = remember(accent, dark) { ColorThemeSpec.rolesFor(ColorTheme.CUSTOM, dark, accent) }
+    val band = remember(dark, accent.saturation) {
+        (0 until 360 step HUE_BAND_STEP).map { deg ->
+            deg to ColorThemeSpec.rolesForHue(deg.toFloat(), accent.saturation.value, dark).primary
+        }
+    }
+
+    SectionCard("自定义色相") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(roles.primary)
+                    .then(
+                        if (active) {
+                            Modifier.border(2.dp, MaterialTheme.colorScheme.onBackground, CircleShape)
+                        } else {
+                            Modifier
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (active) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = roles.onPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "色相 ${accent.hue}° · ${accent.saturation.label}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    if (active) "当前使用中" else "调好之后点右侧启用",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (!active) {
+                Button(onClick = onActivate) { Text("使用") }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // 色相带：点哪段选哪个色相。当前所在的那段加一圈描边做指示
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(28.dp)
+                .clip(RoundedCornerShape(7.dp)),
+        ) {
+            band.forEach { (deg, color) ->
+                val current = accent.hue / HUE_BAND_STEP * HUE_BAND_STEP == deg
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .background(color)
+                        .then(
+                            if (current) {
+                                Modifier.border(2.dp, MaterialTheme.colorScheme.onBackground)
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .clickable { onHue(deg) },
+                )
+            }
+        }
+
+        Slider(
+            value = accent.hue.toFloat(),
+            onValueChange = { onHue(it.roundToInt()) },
+            valueRange = 0f..359f,
+            // steps = 0（连续）：359 个刻度点画出来是一团糊，而且 1 度的移动量
+            // 远小于指尖精度 —— 精细调整交给下面的 ∓ 按钮思路在这里不适用（没有离散档位），
+            // 用户想要绝对精确时直接点色相带更快。
+            colors = SliderDefaults.colors(
+                thumbColor = roles.primary,
+                activeTrackColor = roles.primary,
+            ),
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "饱和度",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            CustomAccent.SatLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = level == accent.saturation,
+                    onClick = { onSaturation(level) },
+                    label = { Text(level.label) },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "色相带与滑块显示的都是**当前明暗下真实的按钮颜色**（不是原始色值），" +
+                "所以这里看到什么颜色，按钮就是什么颜色。饱和度三档会同步作用到容器色与次色 —— " +
+                "无论选哪一档，字压在按钮上的对比度都由派生规则保证达标，不会出现看不清的情况。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+// ---------- 子页：字体 ----------
+
+@Composable
+private fun FontPage(viewModel: ProfileViewModel, onBack: () -> Unit) {
+    val prefs by viewModel.settings.prefs.collectAsState()
+
+    DetailScaffold("字体", onBack) {
+        SectionCard("字号缩放") {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                FontScale.entries.forEachIndexed { index, scale ->
+                    SegmentedButton(
+                        selected = scale == prefs.fontScale,
+                        onClick = { viewModel.setFontScale(scale) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = FontScale.entries.size),
+                    ) { Text(scale.label) }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                prefs.fontScale.detail + "。只影响界面文字，**课表里的字不受影响** —— " +
+                    "课表字号是按列宽推导的（列越宽字越大），再叠一层全局缩放会让字撑出格子。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SectionCard("字族") {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                FontFamilyOption.entries.forEachIndexed { index, family ->
+                    SegmentedButton(
+                        selected = family == prefs.fontFamily,
+                        onClick = { viewModel.setFontFamily(family) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = FontFamilyOption.entries.size),
+                    ) { Text(family.label) }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "${prefs.fontFamily.label}：${prefs.fontFamily.detail}。" +
+                    "这里只用系统自带的字族，没有打包字体文件 —— 本应用要分发给同学，" +
+                    "而一套中文字体就是 3~15MB，包体积不允许。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SectionCard("预览") {
+            Text(
+                "这是正文样式（bodyMedium）。课程表、成绩单里的汉字都用这套字号与字族。",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "学号 20221234 · 高等数学D1 · 第三教学楼 A101 · 张老师",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "小字（labelSmall）：通知、摘要、说明文字用的是这一档。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "标题（titleMedium）",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+
+        SectionCard("当前状态") {
+            InfoRow("字号缩放", "${prefs.fontScale.label}（×${prefs.fontScale.value}）")
+            InfoRow("字族", prefs.fontFamily.label)
+            InfoRow("课表字号", "由列宽推导（当前 ${prefs.timetableSize.nameFontSp}sp），不受上面影响")
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "字族的渲染由系统字体决定：部分国产 ROM 没有独立的中文衬线/等宽字面，" +
+                    "选中后中文会回落到黑体（表现为「选了没变化」）。这不是本应用的 bug，" +
+                    "所以默认档推荐保持「默认」。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -484,27 +784,31 @@ private fun TimetableSizePage(viewModel: ProfileViewModel, onBack: () -> Unit) {
 
     DetailScaffold("课表显示", onBack) {
         SectionCard("格子尺寸") {
-            LevelSlider(
+            StepSlider(
                 title = "格子高度",
-                unit = "dp",
                 value = size.periodHeightDp,
-                levels = TimetableSizeSpec.HEIGHT_LEVELS,
-                labels = TimetableSizeSpec.HEIGHT_LABELS,
+                range = TimetableSizeSpec.MIN_HEIGHT..TimetableSizeSpec.MAX_HEIGHT,
+                endLabels = TimetableSizeSpec.HEIGHT_END_LABELS,
+                step = TimetableSizeSpec.STEP,
+                snap = TimetableSizeSpec::snapHeight,
                 onChange = viewModel::setPeriodHeightDp,
+                onNudge = viewModel::nudgePeriodHeightDp,
             )
-            Spacer(Modifier.height(12.dp))
-            LevelSlider(
+            Spacer(Modifier.height(18.dp))
+            StepSlider(
                 title = "列宽",
-                unit = "dp",
                 value = size.columnWidthDp,
-                levels = TimetableSizeSpec.WIDTH_LEVELS,
-                labels = TimetableSizeSpec.WIDTH_LABELS,
+                range = TimetableSizeSpec.MIN_WIDTH..TimetableSizeSpec.MAX_WIDTH,
+                endLabels = TimetableSizeSpec.WIDTH_END_LABELS,
+                step = TimetableSizeSpec.STEP,
+                snap = TimetableSizeSpec::snapWidth,
                 onChange = viewModel::setColumnWidthDp,
+                onNudge = viewModel::nudgeColumnWidthDp,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "课名字号 ${size.nameFontSp}sp · 教室 ${size.placeFontSp}sp（随列宽推导）",
+                    "课名字号 ${size.nameFontSp}sp · 教室 ${size.placeFontSp}sp（随列宽推导，调宽度就会跟着变）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -538,22 +842,27 @@ private fun TimetableSizePage(viewModel: ProfileViewModel, onBack: () -> Unit) {
 }
 
 /**
- * 档位滑块。
+ * 尺寸调节：连续滑块 + ∓ 微调按钮 + 实时 dp 数值。
  *
- * 拖动过程中每帧都回调，但值域被压成 0..4 这 5 个整数位，所以真正写盘的次数
- * 最多是 5 次 —— 「即时生效」不等于「每次都写文件」。
+ * ## 为什么从「5 档分档滑块」换成这个形态
+ * 档位加密到 2dp 之后是 31/29 档，`Slider(steps = 29)` 会画出 29 个刻度点，视觉上很吵；
+ * 而且 2dp 在屏幕上的移动量**远小于指尖精度** —— 只靠拖拽根本停不到想要的档位上。
+ * 所以：滑块保持连续（`steps = 0`，拖动时吸附到档位网格），精确调整交给两侧的按钮。
+ *
+ * ## 为什么两端只标形容词
+ * 31 档起不出 31 个不重复又不啰嗦的名字。数值是诚实的，形容词只在两端给个「方向感」。
  */
 @Composable
-private fun LevelSlider(
+private fun StepSlider(
     title: String,
-    unit: String,
     value: Int,
-    levels: List<Int>,
-    labels: List<String>,
+    range: IntRange,
+    endLabels: List<String>,
+    step: Int,
+    snap: (Int) -> Int,
     onChange: (Int) -> Unit,
+    onNudge: (Int) -> Unit,
 ) {
-    val index = levels.indexOf(value).takeIf { it >= 0 } ?: TimetableSizeSpec.snap(levels, value).let(levels::indexOf)
-
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -561,21 +870,50 @@ private fun LevelSlider(
         ) {
             Text(title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text(
-                "$value$unit · ${labels.getOrElse(index) { "—" }}",
-                style = MaterialTheme.typography.labelMedium,
+                "$value dp",
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium,
             )
         }
-        Slider(
-            value = index.toFloat(),
-            onValueChange = { raw ->
-                val i = raw.roundToInt().coerceIn(levels.indices)
-                onChange(levels[i])
-            },
-            valueRange = 0f..levels.lastIndex.toFloat(),
-            steps = (levels.size - 2).coerceAtLeast(0),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 微调按钮用文字「−/+」而不是图标：`material-icons-core` 里没有 Remove，
+            // 而往上/下箭头在「列宽」上语义不通（列宽是窄/宽，不是矮/高）。
+            // U+2212 是数学减号 —— 比连字符宽、居中，和加号视觉重量相当。
+            IconButton(
+                onClick = { onNudge(-step) },
+                enabled = value > range.first,
+            ) {
+                Text("−", style = MaterialTheme.typography.titleLarge)
+            }
+            Slider(
+                value = value.toFloat(),
+                // 拖动时吸附到档位网格：onValueChange 给的是连续浮点，
+                // 不吸附的话每帧都会写进一个非档位值，落盘与显示都会抖
+                onValueChange = { raw -> onChange(snap(raw.roundToInt())) },
+                valueRange = range.first.toFloat()..range.last.toFloat(),
+                steps = 0,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(
+                onClick = { onNudge(step) },
+                enabled = value < range.last,
+            ) {
+                Text("+", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            endLabels.forEach {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

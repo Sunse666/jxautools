@@ -17,6 +17,7 @@ import cn.edu.jxau.tools.data.model.XueJiSchema
 import cn.edu.jxau.tools.data.net.CasRsa
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.theme.JxauPalette
+import cn.edu.jxau.tools.ui.theme.typographySelfTest
 import cn.edu.jxau.tools.ui.timetable.CoursePalette
 import cn.edu.jxau.tools.ui.timetable.TimetableSurface
 
@@ -77,6 +78,7 @@ object SelfTest {
         report("课程块配色", CoursePalette.selfTest())
         report("主题色派生", ColorThemeSpec.selfTest())
         report("表面层级配色", JxauPalette.selfTest())
+        report("字体链路（字族/字号缩放）", typographySelfTest())
         report("课表空格底纹", TimetableSurface.selfTest())
         report("日历写出（折行/转义/时区）", IcsWriter.selfTest())
         report("考试时间解析", ExamIcs.selfTest())

@@ -4,6 +4,9 @@ import android.content.Context
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.model.AppPreferences
 import cn.edu.jxau.tools.data.model.ColorTheme
+import cn.edu.jxau.tools.data.model.CustomAccent
+import cn.edu.jxau.tools.data.model.FontFamilyOption
+import cn.edu.jxau.tools.data.model.FontScale
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableSize
@@ -20,7 +23,7 @@ import java.time.LocalDate
  * 课表尺寸要在课表页生效，两处各订阅一次就自动跟着变；漏订阅某一处的表现是
  * 「设置改了但那个页面没变」，靠人工检查很难覆盖全，靠数据流就不会漏。
  *
- * 落盘是同步 apply()：偏好只有 3 个键，写的是内存缓存，代价可以忽略，
+ * 落盘是同步 apply()：偏好只有十来个键，写的是内存缓存，代价可以忽略，
  * 换来的是「杀进程再进来设置还在」这种可验证的确定性。
  */
 class SettingsRepository private constructor(private val store: SettingsStore) {
@@ -32,8 +35,24 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
 
     fun setThemeMode(mode: ThemeMode) = mutate { it.copy(themeMode = mode) }
 
-    /** 切换主题色相（「经典蓝/青碧/紫罗兰…」）。与明暗模式相互独立，各改各的 */
+    /** 切换主题色相（「经典蓝/青碧/紫罗兰…」或「自定义」）。与明暗模式相互独立，各改各的 */
     fun setColorTheme(theme: ColorTheme) = mutate { it.copy(colorTheme = theme) }
+
+    /**
+     * 改自定义色相的参数（色相角 / 饱和度档）。
+     *
+     * 拖色相滑块时会**每帧调用**，所以这里和尺寸滑块一样靠 [mutate] 的「值没变就返回」收敛；
+     * 但色相是 0..359 的连续量，收敛后仍会有几十次真实写入 —— 因此**不给它单独的日志分支**
+     * （见 [mutate] 的 when），否则拖动一次就刷几百行日志，
+     * 而「靠日志验收即时生效」这件事会被自己的日志淹没。
+     */
+    fun setCustomAccent(accent: CustomAccent) = mutate { it.copy(customAccent = accent) }
+
+    /** 全局字号缩放档（只影响走 Typography 的界面文字，不影响课表自绘字号） */
+    fun setFontScale(scale: FontScale) = mutate { it.copy(fontScale = scale) }
+
+    /** 字族（系统黑体 / 衬线 / 等宽） */
+    fun setFontFamily(family: FontFamilyOption) = mutate { it.copy(fontFamily = family) }
 
     /**
      * 设置格子高度。传进来的是滑块当前档位的 dp 值。
@@ -93,6 +112,10 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
                 JxauLog.i("主题已切换：${current.themeMode.label} → ${next.themeMode.label}")
             next.colorTheme != current.colorTheme ->
                 JxauLog.i("主题色已切换：${current.colorTheme.label} → ${next.colorTheme.label}")
+            next.fontScale != current.fontScale ->
+                JxauLog.i("字号缩放已切换：${current.fontScale.label} → ${next.fontScale.label}")
+            next.fontFamily != current.fontFamily ->
+                JxauLog.i("字族已切换：${current.fontFamily.label} → ${next.fontFamily.label}")
             next.termAnchor != current.termAnchor ->
                 JxauLog.i(
                     when (val a = next.termAnchor) {
@@ -105,6 +128,9 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
                     "课表尺寸已更新：格子高 ${next.timetableSize.periodHeightDp}dp、" +
                         "列宽 ${next.timetableSize.columnWidthDp}dp、课名 ${next.timetableSize.nameFontSp}sp"
                 )
+            // ⚠️ 刻意**没有** customAccent 的分支：色相滑块拖动时它每帧都变，
+            // 给它一条日志就等于把日志刷爆，而「即时生效」正是靠日志验收的。
+            // 切到「自定义」这一动作本身已经由上面的 colorTheme 分支记下来了。
         }
     }
 

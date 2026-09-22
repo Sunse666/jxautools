@@ -64,7 +64,13 @@ class MainActivity : ComponentActivity() {
             val prefs by remember(appContext) { SettingsRepository.get(appContext) }.prefs.collectAsState()
             val dark = prefs.themeMode.isDark(isSystemInDarkTheme())
 
-            JxauTheme(theme = prefs.colorTheme, darkTheme = dark) {
+            JxauTheme(
+                theme = prefs.colorTheme,
+                darkTheme = dark,
+                customAccent = prefs.customAccent,
+                fontScale = prefs.fontScale,
+                fontFamily = prefs.fontFamily,
+            ) {
                 ApplySystemBarAppearance(window = window, dark = dark)
                 // 主题背景铺到根：这样状态栏/导航栏下方的空白也跟着配色走，
                 // 不会出现「内容是深色、边角还是白的」
