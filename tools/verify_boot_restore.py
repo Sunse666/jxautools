@@ -20,23 +20,38 @@
 要「停掉进程但保持可收广播」用 `am kill`（只杀后台进程，不动 stopped 标志）。
 
 ## 用法
-    python tools/verify_boot_restore.py                   # 三轮全跑（约 1 分钟）
-    python tools/verify_boot_restore.py --rounds future   # 只跑某一轮
+    python tools/verify_boot_restore.py                     # 三轮全跑
+    python tools/verify_boot_restore.py --rounds future     # 只跑某一轮
 
 三轮分别回答三个不同的问题：
 1. **future** —— 未来时刻的记录，重启后会被补排吗？
 2. **past**  —— 已过期的记录，重启后会不会补出一条立刻触发的幽灵闹钟？（反向控制）
-3. **probe** —— 把**整个包** `pm disable` 掉，同样的注入在重启后还会不会出现闹钟？
-   这一轮是**变异探针**：只有它把「闹钟重建」这个行为钉死到 `BootReceiver` 名下，
-   否则前两轮只是「好现象」——闹钟也可能是别的路径排的。
-   （为什么不能只禁 `BootReceiver` 这一个组件：见 `round_receiver_off` 的说明。）
+3. **mutant** —— **代码级变异**：装一个清单里没有 `BootReceiver` 的包，
+   同样的注入在重启后还会不会出现闹钟？这一轮把「闹钟重建」这个行为钉死到
+   `BootReceiver` 名下，否则前两轮只是「好现象」——闹钟也可能是别的路径排的。
 
-建议**分三轮跑**（`--rounds future` / `past` / `probe`）：第 3 轮要动包状态，
-单独跑能把风险隔离开，出问题也不至于把前两轮的证据一起丢掉。
+建议**分三轮跑**（`--rounds future` / `past` / `mutant`），因为第 3 轮要求
+设备上装的是**变异包**，和另外两轮的前置条件互斥：装变异包 → 只跑 mutant →
+换回正式包 → 只跑 future/past。
 
 前置条件：设备已连上、`cn.edu.jxau.tools` 已安装 debug 包（`run-as` 需要 debuggable）。
 
 ⚠️ 每轮会重启设备一次，跑完自动把 `rush_trigger_at` 恢复成原值。
+
+## 怎么造变异包（`--rounds mutant` 的前置）
+
+变异点是**清单里的 `<receiver android:name=".service.BootReceiver">` 整块**：
+把它注释掉重新构建安装即可，代码一行不用改（这也让「改回去」没有残留风险）。
+
+```bash
+export JAVA_HOME="D:/IO/jdk17"                 # ⚠️ 必须是 Windows 形态
+GR=$(ls -d "$HOME/.gradle/wrapper/dists"/gradle-*-bin/*/gradle-*/bin/gradle | head -1)
+"$GR" --offline :app:assembleDebug --no-daemon --console=plain
+"D:/IO/sdk/platform-tools/adb.exe" -s 127.0.0.1:7555 install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+跑完把清单改回来、重新构建安装，再跑 `--rounds future` 作为**回归后置条件**
+（它必须重新全绿，否则说明变异包没换干净）。
 """
 
 from __future__ import annotations
@@ -104,29 +119,6 @@ class Dev:
 
     def connect(self) -> None:
         self.raw("connect", self.serial)
-
-    def whoami(self) -> str:
-        out = self.sh("id")
-        return out.split()[0].strip() if out.strip() else "（读不到 id，设备可能不在线）"
-
-    def ensure_root(self) -> str:
-        """确保 adbd 是 root，**但不要无条件 `adb root`**。
-
-        ⚠️ 实测（2026-09-22）：MuMu 的 adbd **默认就是 root**，`adb root` 只会重启一次 adbd；
-        而这一轮紧接着要 `adb reboot` —— 组合起来把模拟器实例搞成了 `offline`
-        （连 `MuMuManager` 都报 `player_state=start_finished`，但 adb 一直握手不上），
-        清理耗时按小时计。所以这里**先看 `id`，不是 root 才升级**，升级后必须重新 connect。
-
-        返回 `id` 的原样输出，交给调用方断言。
-        """
-        cur = self.sh("id")
-        if "uid=0" in cur:
-            return cur
-        self.raw("root")
-        time.sleep(8)
-        self.connect()
-        time.sleep(3)
-        return self.sh("id")
 
     def now_ms(self) -> int:
         return int(self.sh("date +%s").strip()) * 1000
@@ -284,54 +276,67 @@ def round_past(dev: Dev, past: int) -> None:
     check(parse_value(dev.read_cache()) == 0, "落盘值已被归零：%s" % parse_value(dev.read_cache()))
 
 
-def round_receiver_off(dev: Dev, target: int) -> None:
-    """变异探针：让本包**收不到开机广播**，同样注入未来时刻 → 重启后闹钟**必须**不出现。
+def round_mutant(dev: Dev, target: int) -> None:
+    """变异探针（**代码级**）：APK 清单里没有 `BootReceiver` → 同样注入、同样重启，
+    闹钟**必须**不出现。
 
-    没有这一轮，第 1 轮只是「好现象」而不是「被证明的因果」：闹钟可能是别的东西排的。
-    切断之后现象消失，才说明「闹钟重建」这个行为确实归本包负责。
+    没有这一轮，第 1 轮只是「好现象」而不是「被证明的因果」：闹钟也可能是别的路径排的。
 
-    ⚠️ **为什么禁的是整个包，而不是只禁 `BootReceiver`**：
-    Android 11+ 起，shell **即使拿到 root 也不能改第三方包的「组件」启用状态** ——
-    `pm disable-user <pkg>/<comp>` 直接抛
-    `SecurityException: Shell cannot change component state for …`，
-    而且 `dumpsys package` 里连 `Disabled components` 段都不会出现（详见
-    `docs/工程踩坑总表.md` §7.7）。包级禁用是等效可执行的变异手段。
-    它同时会停掉 `MainActivity`，但「是接收器而不是 `MainActivity` 兜底」这一点
-    由第 1 轮那条「自检日志 0 条」单独排除，两条合起来因果就完整了。
+    ## ⚠️ 为什么变异落在代码/清单上，而不是设备状态上（本机实测，2026-09-22）
+
+    最初想用平台手段切断开机广播，两条路都走不通：
+
+    - **组件级** `pm disable-user <pkg>/<comp>`：Android 11+ 起 shell **即使 root
+      也不能改第三方包的组件状态** —— 直接抛
+      `SecurityException: Shell cannot change component state for …`，
+      `dumpsys package` 里连 `Disabled components` 段都不出现。
+    - **包级** `pm disable <pkg>`：**在 MuMu 镜像上不跨重启保持**。实测两次独立复现：
+      重启前 `pm list packages -d` 里能看到本包，重启后**没了**、`enabled=1`。
+      于是开机时包是启用的，接收器照跑 —— 探针拿到一个**假失败**
+      （现场证据：`dumpsys alarm` 里那颗闹钟的 `origWhen` 正是注入值，
+      日志里 `已设定抢课定时触发`，而 uptime 只有 34s，说明设备确实重启过）。
+
+    结论：**变异必须落在编译产物里**，落在设备状态上的「关掉它」在本机不可靠。
+    详见 `docs/工程踩坑总表.md` §7.8。
+
+    ## 前置（脚本自己查证）
+    设备上装的必须是**变异包**：`cmd package query-receivers -a …BOOT_COMPLETED`
+    里查不到本包。这一条单独断言，**不许省** —— 没有它，「重启后没闹钟」既可能是
+    「代码坏」也可能是「探针没生效」，两者分辨不出来。
     """
-    print("\n=== 第 3 轮（变异探针）：禁用整个包 → 重启后不该有任何闹钟 ===")
-    who = dev.ensure_root()
-    check("uid=0" in who, "前置：adbd 有 root（%s）" % who)
 
-    # ⚠️ 顺序必须是「**先注入、后禁用**」：注入靠 `run-as` 写 prefs，
-    # 而包一旦被 `pm disable`，`run-as` 就不一定能用了。
-    # 注入必须在禁用之前完成，否则这一轮连前置都搭不起来。
+    def declares_boot_receiver() -> bool:
+        out = dev.sh("cmd package query-receivers -a android.intent.action.BOOT_COMPLETED")
+        return PKG in out
+
+    print("\n=== 第 3 轮（变异探针 / 代码级）：清单里没有 BootReceiver → 重启后不该有闹钟 ===")
+    if not check(
+        not declares_boot_receiver(),
+        "前置：装的是变异包（`query-receivers -a BOOT_COMPLETED` 里查不到本包）",
+    ):
+        print(
+            "    → **探针无效，本轮结论不成立**。请先按文件头「怎么造变异包」装变异包再跑。",
+        )
+        return
+
     dev.sh("am kill %s" % PKG)
     time.sleep(2)
     inject(dev, target)
     check(parse_value(dev.read_cache()) == target, "前置：已注入未来时刻 %d" % target)
 
-    dev.sh("pm disable %s" % PKG)
-    disabled = PKG in dev.sh("pm list packages -d")
-    check(disabled, "前置：%s 已被禁用（`pm list packages -d` 里能看到）" % PKG)
-    try:
-        log = dev.reboot_and_collect()
-        check("重新排入抢课闹钟" not in log, "开机日志里没有接收器的痕迹（包被禁用，符合预期）")
-        check("自检开始" not in log, "App 在重启后没有被启动过")
-        after = dev.alarms()
-        check(not after, "重启后闹钟为空 —— 证明闹钟确实由本包重建，而非其他路径：%s" % (after or "（空）"))
-        check(parse_value(dev.read_cache()) == target, "落盘值未被消费（接收器没跑，条目还在）")
-    finally:
-        dev.sh("pm enable %s" % PKG)
-        still = PKG in dev.sh("pm list packages -d")
-        print("    已重新启用 %s（仍禁用=%s）" % (PKG, still))
+    log = dev.reboot_and_collect()
+    check("重新排入抢课闹钟" not in log, "开机日志里没有接收器的痕迹（清单里没有它，符合预期）")
+    check("自检开始" not in log, "App 在重启后没有被启动过（排除 MainActivity 兜底）")
+    after = dev.alarms()
+    check(not after, "重启后闹钟为空 —— 闹钟确实由本包（BootReceiver）重建：%s" % (after or "（空）"))
+    check(parse_value(dev.read_cache()) == target, "落盘值未被消费（接收器没跑，条目还在）")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--adb", default=None, help="adb 可执行文件或所在目录；默认 D:\\IO\\sdk\\platform-tools\\adb.exe")
     ap.add_argument("--serial", default=SERIAL_DEFAULT)
-    ap.add_argument("--rounds", default="all", choices=["all", "future", "past", "probe"])
+    ap.add_argument("--rounds", default="all", choices=["all", "future", "past", "mutant"])
     a = ap.parse_args()
 
     adb = resolve_adb(a.adb)
@@ -359,8 +364,8 @@ def main() -> int:
             round_future(dev, now + 45 * 60 * 1000)
         if a.rounds in ("all", "past"):
             round_past(dev, now - 60 * 60 * 1000)
-        if a.rounds in ("all", "probe"):
-            round_receiver_off(dev, now + 45 * 60 * 1000)
+        if a.rounds in ("all", "mutant"):
+            round_mutant(dev, now + 45 * 60 * 1000)
     finally:
         # 无论成败都恢复：注入值不是用户偏好，但留着会变成一条幽灵闹钟
         restore = original if original else 0
