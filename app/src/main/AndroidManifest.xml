@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 抢课定时触发（Android 12+ 需用户在设置中授予精确闹钟；未授予时降级为非精确并明示） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!--
+      重启后重建闹钟。之前缺这条权限也缺接收器 → 设备重启后 AlarmManager 里的闹钟
+      全部丢失，定时抢课静默失效（用户以为还挂着）。
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!--
       Android 11+ 的包可见性过滤：不声明的话 `queryIntentActivities` 看不见别的包，
@@ -49,6 +54,29 @@
         <receiver
             android:name=".service.RushAlarmReceiver"
             android:exported="false" />
+
+        <!--
+          重启 / 应用更新 / 系统时间变化后重排闹钟。这几个都是**受保护广播**（只有系统能发），
+          所以 exported="true" 不会带来伪造风险；写成 false 反而有收不到的风险，
+          而「收不到」在这里等于定时抢课静默失效。
+
+          ⚠️ **故意不声明 `LOCKED_BOOT_COMPLETED`**：direct boot 阶段（用户解锁前）
+          credential-encrypted 存储不可读，`shared_prefs` 会拿到空数据 →
+          `restorePending` 读到 0、静默返回，闹钟补不回来；而解锁快的时候又能读到，
+          表现为**随机的成功/失败**。抢课本来就需要已登录的会话（同样在那个存储里），
+          在 direct boot 阶段排闹钟没有意义 —— 只声明解锁后的 `BOOT_COMPLETED`，
+          把竞态从设计里去掉。实测记录见 `docs/工程踩坑总表.md` §7.5。
+        -->
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!--
           导出考试安排为 .ics 时把文件分享给日历 / 邮件 / 微信。

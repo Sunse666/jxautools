@@ -1,5 +1,9 @@
 package cn.edu.jxau.tools
 
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -22,10 +26,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.core.SelfTest
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.SettingsRepository
 import cn.edu.jxau.tools.data.net.SiteProfiles
+import cn.edu.jxau.tools.service.RushScheduler
 import cn.edu.jxau.tools.ui.AppRoot
 import cn.edu.jxau.tools.ui.theme.JxauPalette
 import cn.edu.jxau.tools.ui.theme.JxauTheme
@@ -42,6 +48,7 @@ class MainActivity : ComponentActivity() {
         SelfTest.runAll()
 
         startKeepaliveWhenLoggedIn()
+        applyAlarms()
 
         enableEdgeToEdge()
 
@@ -91,6 +98,44 @@ class MainActivity : ComponentActivity() {
      * 用 lifecycleScope 而不是某个 Composable 的 scope：保活要在切 Tab、锁屏后继续跑，
      * 绑到 Compose 的合成生命周期上会被提前取消。
      */
+    /**
+     * 把抢课闹钟对齐到落盘状态，并清掉历史版本留下的幽灵闹钟。**幂等**，每次启动都跑一遍。
+     *
+     * 闹钟活不过「设备重启」和「用户强制停止」，而重建逻辑万一漏了哪条路径
+     * （比如某个 ROM 不发 `BOOT_COMPLETED`、或包被强停过导致系统不再投递开机广播），
+     * 表现就是**定时抢课静默失效**。「App 启动」是唯一一定会发生的事件，用它兜底最省心：
+     * 闹钟丢了最迟在下次打开 App 时被补回来。
+     */
+    private fun applyAlarms() {
+        cancelLegacyReminderAlarm()
+        RushScheduler.restorePending(this)
+    }
+
+    /**
+     * 撤掉历史版本（2026-09-22 之前）留下的每日提醒闹钟。
+     *
+     * 旧版本会排一个 `DailyCourseAlarmReceiver` 的闹钟，而那个接收器已经连同功能一起删掉了。
+     * ⚠️ **闹钟不会随包更新消失** —— 它留在系统的 `AlarmManager` 里，到点触发时系统找不到接收器，
+     * 在日志里留下一条 `Unable to start receiver`；用户每跨一次版本就多留一颗。
+     * 所以「删掉接收器」这件事必须配一次主动撤销，否则清理只做了一半。
+     * （实测：重装新包后 `dumpsys alarm` 里那颗 `DailyCourseAlarmReceiver` 仍在。）
+     *
+     * 匹配靠请求码 + 组件名 —— `PendingIntent` 的相等性只看这两样（外加 action/data/type），
+     * `FLAG_UPDATE_CURRENT` 只影响 extras。**这是一次性兼容代码**，确认没有旧版本在跑后可以删。
+     */
+    private fun cancelLegacyReminderAlarm() {
+        val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val legacy = Intent().setClassName(this, LEGACY_REMINDER_RECEIVER)
+        alarm.cancel(
+            PendingIntent.getBroadcast(
+                this,
+                REQUEST_CODE_LEGACY_REMINDER,
+                legacy,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            ),
+        )
+    }
+
     private fun startKeepaliveWhenLoggedIn() {
         val repo = SessionRepository.get(this)
         lifecycleScope.launch {
@@ -104,6 +149,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    companion object {
+        /** 已删除的接收器名。只用于撤销旧版本留下的闹钟，见 [cancelLegacyReminderAlarm] */
+        private const val LEGACY_REMINDER_RECEIVER = "cn.edu.jxau.tools.service.DailyCourseAlarmReceiver"
+
+        /**
+         * 旧版本排每日提醒闹钟时用的请求码。
+         * **必须与当年那个值一致**（当时在 `DailyReminderScheduler` 里），
+         * 否则 `PendingIntent` 匹配不上，撤销会**静默失败** —— 幽灵闹钟继续留着。
+         */
+        private const val REQUEST_CODE_LEGACY_REMINDER = 4202
     }
 }
 

@@ -11,6 +11,7 @@ import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.net.SiteProfiles
+import cn.edu.jxau.tools.service.RushScheduler
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDate
@@ -77,6 +78,10 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
      */
     fun logout() {
         JxauLog.i("用户主动退出登录")
+        // 待触发的抢课闹钟一起撤掉：没有会话时它触发只会白跑一趟，
+        // 而且「退出登录后还会自己开始抢课」这件事本身就是错的。
+        // 撤掉会同时清掉落盘的时刻（见 RushScheduler.cancel），所以重启后也不会被补回来。
+        RushScheduler.cancel(getApplication())
         repo.clear()
     }
 
