@@ -50,9 +50,15 @@
 - **T2 大纲**：`docs/T2功能实施大纲.md`。P0 = 成绩单 PDF（带章）下载 / 学分进度 /
   主干课程绩点 / 成绩趋势；P1 = 找空教室 / 培养方案 / 考试倒计时。
 - **UI 改造（`docs/UI改造实施大纲.md`）**：P0 已交付（`ca8e69c`：课表 2dp 档位 · 主题色 12 预设 +
-  自定义色相 · 字号缩放 + 系统字族）；**P1 控件归位已交付**（`StatusTag` 抽 6 处标签 · `PrimaryTabRow` ·
-  2 处 `SegmentedButton` · 2 处 `Switch` · 导航图标 outlined↔filled）。P2 待做：设置页
-  `SectionCard` → 分组 + `ListItem`；`TopAppBar`（按大纲 §1.1 方案 (a)：课表页不加）。
+  自定义色相 · 字号缩放 + 系统字族）；**P1 控件归位已交付**（`8f3100d`：`StatusTag` 抽 6 处标签 ·
+  `PrimaryTabRow` · 2 处 `SegmentedButton` · 2 处 `Switch` · 导航图标 outlined↔filled）；
+  **P2 设置页行归位已交付**（`NavRow` → M3 `ListItem` · `SettingsGroup` 归位到 `DetailParts.kt`
+  并写下【信息展示 vs 设置项】分工规则）。
+  **P3 待办且需用户拍板**：`TopAppBar`（大纲 §1.1 A3 三选一 —— 课表页要不要让出 64dp）。
+- **UI 清单的写法教训（该清单 5 条里错了 4 条）**：grep 只给「出现了什么」，不给
+  「用在什么语义上」，也**不看历史**。每条都要落到「这一处的语义是什么」+「这状态是什么时候的」
+  才能进清单。四错：`FilterChip` 那两处本就是筛选；`Checkbox` 实际 1 处（另一处是 `TextButton`）；
+  自绘标签实际 6 处不是 4 处；**「设置页是卡片墙」写大纲时就已过期**（`git log -S` 一查即知）。
 - 新排功能判据（**换掉「按接口好挖排」**）：一学期真会用几次 · 有无等效替代 · 出错可否挽回。
 - 明确不做：评教 · 免修补修 · 等级考试**报名与支付**（链路含 `alipayto`）· 消息中心（服务端 500）·
   教材核对（Ext.NET）· 桌面小组件 · **自行推算 GPA** · 按教师查课表。
@@ -95,11 +101,19 @@
 - **M3 四种 chip 全都强制 `onClick`** —— 纯陈述型标签（「已选」「补考」「运行中」）套 `AssistChip`
   会带上假涟漪 + 错误的无障碍语义。静态 tonal 容器的正解是
   `Surface(shape = MaterialTheme.shapes.extraSmall, color, contentColor)`（项目里是 `StatusTag`）。
+- **`ListItem` 内部不撑满宽度**（只有 `minimumInteractiveComponentSize` + `sizeIn(minHeight)`）——
+  在 Column 里会缩成内容宽度，点击热区只剩文字。用它的地方**必须自己补 `fillMaxWidth()`**。
+- **M3 参数名与属性名会不一致**：`ListItemDefaults.colors()` 的参数是 `supportingColor`，
+  而 `ListItemColors` 的属性是 `supportingTextColor`。**查 Kotlin 真实参数名的可靠办法**：
+  `javap -v` 打 `@Metadata` 的 `d2` 字符串数组，属性名与参数名都在里面；
+  javap 的 `getXxx` **只对应属性，不对应参数名**（照它猜参数名会连错两次）。
 - **`MaterialTheme.shapes` 没被覆盖时就是 M3 baseline**：extraSmall 4 / small 8 / medium 12 /
   large 16 / extraLarge 28 → 把写死的 `RoundedCornerShape(4|8|12.dp)` 换成 `shapes.*` 是**零视觉变化**的清理。
-- **文本工具脚本的三个坑**（`verify_ui_controls.py` 第一版都误报过）：取表达式的最后一段前要先剥
-  `.copy(...)`（否则 `color.copy(alpha = 0.14f)` 切成 `14f`）；数 `TabRow(` 会被 `PrimaryTabRow(` 命中
-  → 名字前加 `(?<![A-Za-z0-9_.])`；找调用要跳过 `fun X(` 声明。
+- **文本工具脚本的坑（`verify_ui_controls.py` 都误报过）**：取表达式最后一段前要先剥 `.copy(...)`
+  （否则 `color.copy(alpha = 0.14f)` 切成 `14f`）；数 `TabRow(` 会被 `PrimaryTabRow(` 命中
+  → 名字前加 `(?<![A-Za-z0-9_.])`；找调用要跳过 `fun X(` 声明；
+  **断言前必须先 `strip_comments()`** —— 注释里写了「`.fillMaxWidth()` 不能省」，
+  会把这个断言在真正删掉那行之后**照样喂饱**（探针当场抓出的假绿）。
 - **每次 Bash 调用 adb daemon 都会重启** → `connect` 与命令必须同一次调用，带 `-s 127.0.0.1:7555`；
   **模拟器访问宿主机用 `10.0.2.2`**；**Git Bash 没有 `unzip`**（静默失败 → 假通过）；
   **Git Bash 给 Windows 原生 exe 传路径必须用 `pwd -W`**（`/d/...` 会被解释成 `D:\d\...`）。

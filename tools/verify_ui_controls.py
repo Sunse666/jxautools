@@ -12,6 +12,8 @@ P1 做的是一批「不会编译报错、也不会被运行时自检发现」�
    Kotlin 编译器不管，`core/SelfTest.kt` 也看不到 UI 层源码。**只能静态查**。
 2. **控件被改回去**。`TabRow` / 竖排 `RadioButton` / `Checkbox` 这些东西一旦有人再写回来，
    没有任何东西会拦他 —— 除非有一条断言写着「这几样现在是 0 处」。
+3. **两个本该分工的容器混用**（P2）。`SectionCard`（信息展示）与 `SettingsGroup`（设置项）
+   一旦有一个跑到别处去定义、或者有人把 `ListItem` 退回手写 `Row`，同样没人拦。
 
 所以这个脚本断言的是 **P1 的「改完之后应该是什么样」**，不是「代码能跑」。
 它同时自带一组**已知坏样本**做自证（见 §0），否则「全部 PASS」可能只是查了个空。
@@ -295,12 +297,103 @@ def check_shapes():
           SOURCES.get(os.path.join(UI, "profile", "DetailParts.kt"), ""), True)
 
 
+def strip_comments(src):
+    """去掉 `//` 行注释与 `/* */` 块注释，**再**做包含判断。
+
+    ⚠️ 这一步是必需的，不是讲究：NavRow 的注释里写了「`.fillMaxWidth()` 不能省」，
+    于是 `"fillMaxWidth()" in body` 在那个 `fillMaxWidth()` 被删掉之后**照样为真** ——
+    断言被自己的注释喂饱，变异探针当场报出 `NOT CAUGHT`。注释会进 grep，
+    这对人对工具都成立。
+    （不处理字符串字面量里的 `//`；本文件涉及的断言不碰那种字面量。）
+    """
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return "\n".join(line.split("//")[0] for line in src.splitlines())
+
+
+def function_body(src, anchor):
+    """取 `anchor` 所在函数的 `{...}` 正文（已去注释，大括号配平）。找不到返回 `None`。
+
+    只用来把检查范围**收窄到一个函数里** —— 断言「这三个颜色出现在 NavRow 里」
+    而不是「出现在这个文件里」。后者会被文件别处的同名写法喂饱，等于没查。
+    """
+    src = strip_comments(src)
+    i = src.find(anchor)
+    if i < 0:
+        return None
+    j = src.find("{", i)
+    if j < 0:
+        return None
+    depth, k = 0, j
+    while k < len(src):
+        if src[k] == "{":
+            depth += 1
+        elif src[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[j: k + 1]
+        k += 1
+    return None
+
+
+# ---------------------------------------------------------------- §5 设置分组与列表行
+def check_list_items():
+    """P2：设置分组的行改用 M3 的 `ListItem`，分组容器归位到 DetailParts。
+
+    ⚠️ 计数用 `find_calls`（要求名字后面紧跟 `(` 且前面不是标识符字符），
+    所以 `ListItemDefaults.colors(` 不会被算成一处 `ListItem(`。
+    """
+    profile = SOURCES.get(os.path.join(UI, "profile", "ProfileScreen.kt"), "")
+    parts = SOURCES.get(os.path.join(UI, "profile", "DetailParts.kt"), "")
+
+    # `NavRow` 是**唯一**一处列表行实现，12 个入口都调它。所以这里数的是「实现处数 = 1」，
+    # 不是「调用次数」。将来真需要在别处再加一处 ListItem，就顺手把这行改成 2 并写清是哪两处 ——
+    # 刻意的摩擦，用来拦住「复制一份 NavRow 改改用」。
+    check("§5 入口行只有一处 ListItem 实现（ProfileScreen.NavRow）",
+          sum(len(find_calls(src, "ListItem")) for src in SOURCES.values()), 1)
+
+    # 三个槽位的颜色都要显式给：ListItem 的默认值走 onSurfaceVariant，
+    # 不写的话「前导图标主色 / 尾随箭头次要色 / 摘要次要色」会一起塌成灰色。
+    # 判据收窄到 NavRow 函数内部，否则文件别处的同名颜色会把这条喂饱。
+    # ⚠️ M3 自己名字没对齐：`ListItemColors` 的属性叫 `supportingTextColor`，
+    # 而 `ListItemDefaults.colors()` 的**参数**叫 `supportingColor`
+    # （两个名字在同一个类的 Kotlin metadata 里都能 grep 到，别抄错那一个）。
+    nav = function_body(profile, "private fun ColumnScope.NavRow(")
+    if nav is None:
+        check("§5 找到 NavRow 函数体", False, True)
+        return
+    missing_colors = [k for k in ("ListItemDefaults.colors(", "leadingIconColor",
+                                  "trailingIconColor", "supportingColor")
+                      if k not in nav]
+    check("§5 NavRow 的三个槽位配色都显式给出", missing_colors, [])
+
+    # `ListItem` 内部不撑满宽度（只有 minHeight），少写 fillMaxWidth 会静默变成
+    # 「点击热区只剩文字、箭头浮在行中间」—— 编译能过、界面不崩，属于最该被断言盯住的一类。
+    check("§5 NavRow 自己补 fillMaxWidth（ListItem 内部不撑满）",
+          "fillMaxWidth()" in nav, True)
+
+    # 「设置项 vs 信息展示」两个容器必须同处维护，且分工规则写在它们旁边。
+    check("§5 `SettingsGroup` 不再定义在 ProfileScreen", "fun SettingsGroup(" in profile, False)
+    check("§5 `SettingsGroup` 定义在 DetailParts 且可见性为 internal",
+          "internal fun SettingsGroup(" in parts, True)
+    check("§5 分工规则写在 DetailParts 文件头（“信息展示”与“设置项”两句都在）",
+          ("信息展示" in parts and "设置项" in parts), True)
+
+    # 首页四个分组的数量：少一个说明有人把某组拼进了别的组（或删了入口）
+    check("§5 首页设置分组数（我的信息 / 设置 / 会话与维护 / 其他）",
+          len(find_calls(profile, "SettingsGroup")), 4)
+
+    # 手写入口行的特征写法（图标 20dp + 手算内边距）不该再出现在 ProfileScreen
+    check("§5 首页不再手写入口行的 14/12dp 内边距",
+          ".padding(horizontal = 14.dp, vertical = 12.dp)" in profile, False)
+
+
 def main():
     self_check_pairs()
     check_status_tags()
     check_to_pairs()
     check_controls()
     check_shapes()
+    check_list_items()
 
     width = max(len(n) for _, n, _, _ in results)
     fails = 0

@@ -19,9 +19,9 @@
 
 | # | 现状 | Pixel/M3 的做法 | 位置 | P1 结果 |
 |---|---|---|---|---|
-| 1 | 全应用 **0 个 `TopAppBar`**；子页用自定义 `DetailScaffold`（`IconButton` + `Text`）当标题栏，主页干脆没有栏 | `Scaffold` + `TopAppBar`（主页 `LargeTopAppBar`，子页 `TopAppBar` + `navigationIcon`） | `ui/AppRoot.kt`、`ui/profile/ProfileScreen.kt` | 留到 P2 |
-| 2 | 设置页是**卡片墙**：每节一张 `Card` + 内嵌标题 | 「分组容器 + `ListItem` 行」，一屏 8~10 行 | `ui/profile/DetailParts.kt::SectionCard` | 留到 P2 |
-| 3 | **`ListItem` 0 处**，所有列表行手写 `Row` | 用 `ListItem`（自动处理前导/标题/副标题/尾随） | 全 ui 包 | 留到 P2 |
+| 1 | 全应用 **0 个 `TopAppBar`**；子页用自定义 `DetailScaffold`（`IconButton` + `Text`）当标题栏，主页干脆没有栏 | `Scaffold` + `TopAppBar`（主页 `LargeTopAppBar`，子页 `TopAppBar` + `navigationIcon`） | `ui/AppRoot.kt`、`ui/profile/ProfileScreen.kt` | ⏳ 待你定（§1.1 A3 三选一） |
+| 2 | ~~设置页是**卡片墙**：每节一张 `Card` + 内嵌标题~~ | ~~「分组容器 + `ListItem` 行」~~ | ~~`ui/profile/DetailParts.kt::SectionCard`~~ | ❌ **这条也是误判，见 §0.4** |
+| 3 | **`ListItem` 0 处**，所有列表行手写 `Row` | 用 `ListItem`（自动处理前导/标题/副标题/尾随） | 全 ui 包 | ✅ 已改（`ProfileScreen.NavRow`） |
 | 4 | 内层切换用 **M2 式 `TabRow`**（下划线指示器） | `PrimaryTabRow` / `SecondaryTabRow`（pill 指示器） | `ui/selection/SelectionScreen.kt:115` | ✅ 已改 |
 | 5 | ~~课程类别**用 `FilterChip` 承担「视图切换」语义**~~ | ~~切换用 tab / `SegmentedButton`~~ | ~~`ui/selection/SelectionScreen.kt:266`~~ | ❌ **这条是误判，不改** |
 | 6 | 明暗模式三选一用 **`RadioButton` 竖排** | `SegmentedButton`（横排，一眼看全三选） | `ProfileScreen.kt:371` | ✅ 已改 |
@@ -30,10 +30,16 @@
 | 9 | 自绘小标签：`Modifier.background(bg, RoundedCornerShape(4.dp))` 共 **6** 处 | `Surface(shape = shapes.extraSmall)` —— ⚠️ **不是 chip**，见下方更正 | `exam:415`、`grade:381`、`rush:246`、`advisor:120`、`selection:549`、`student:243` | ✅ 已改 |
 | 10 | `schemeFor` **漏了 `errorContainer` / `onErrorContainer`**（baseline 恰好是红的，所以没暴露） | 显式给出，堵住 baseline 后门 | `ui/theme/Theme.kt` | ✅ P0 已改 |
 
-### 0.1 这份清单后来被核出三处错，已就地更正
+### 0.1 这份清单后来被核出四处错，已就地更正
 
-清单是 grep 出来的，但 grep 只给「出现了什么」，不给「用在了什么语义上」。P1 动手时逐处读过，纠正如下：
+清单是 grep 出来的，但 grep 只给「出现了什么」，不给「用在了什么语义上」；也**不看历史**。
+分两批动手时逐处读过，纠正如下：
 
+- **第 2 条作废（写清单时就已过期）**：清单说「设置页是卡片墙，六节六张带标题的卡」——
+  但 `SettingsGroup`（分组标题 + 圆角容器）在 `1918920`（**本大纲之前**）就已用于首页四个分组。
+  用 `git log -S "private fun SettingsGroup"` 一查就知道。真正还在用 `SectionCard` 的是**子页**，
+  而那按「信息展示用卡片」的分工是**对的**。教训：清单要连「这状态是什么时候的」一起核，
+  否则会把已经做好的事写成待办。
 - **第 5 条作废**：那两处 `FilterChip`（`SelectionScreen:266` 选课范围、`GradeScreen:130` 只看不及格）
   **本来就是筛选**——多选、可以全不选、选完列表变窄，完全是 `FilterChip` 的语义。
   原清单把「筛选」当成了「视图切换」，是只看了控件名没看 `onClick` 干了什么。
@@ -43,6 +49,10 @@
   但错误性质不同，登记时记岔了。
 - **第 9 条的「4 处」是错的，实际 6 处**：漏了 `selection:549`（「已选」）和 `student:243`（异动记录的类型标签）。
   漏掉 `selection:549` 的代价不只是少改一处——见下一条。
+
+> 五条里四条错，唯一没错的是第 4 条（`TabRow` 那处）。结论不是「别 grep」，
+> 而是**grep 只用来生成候选，每一条都要落到「这一处的语义是什么」才能进清单**。
+
 
 ### 0.2 P1 顺手挖出的一个真缺陷（原清单没列）
 
@@ -98,15 +108,40 @@
 > 内容色靠 `contentColor` 传播（不再每处手写 `color = ...`）。
 
 
-**A2 设置页重构：卡片墙 → 分组列表（中等影响）**
+**A2 设置页重构：卡片墙 → 分组列表 —— ✅ 已落地（2026-09-22），但实际缺口比原方案小得多**
 
-`SectionCard(title) { ... }` 现在把标题嵌在卡片里，六节就是六张带标题的卡。
-Pixel 设置页的形态是「**分组小标题 + 一个圆角容器内若干 `ListItem`**」。
-改法：新增一个 `SettingsGroup(title) { }` 容器 + `SettingRow(...)`（内部用 `ListItem`），
-`SectionCard` 保留给**内容型**卡片（学籍信息、成绩统计那些不是设置项的）。
+> ⚠️ **先说更正**：原方案说「SectionCard 把标题嵌在卡片里，六节就是六张带标题的卡」——
+> **这句话描述的现状在写大纲时就已经不存在了**。`SettingsGroup`（分组标题 + 圆角容器）
+> 早在 `1918920`（本大纲之前）就已用于首页四个分组。见 §0.1 第 2 条。
 
-⚠️ 要区分：**设置项**用 `ListItem`，**信息展示**仍用卡片。一刀切全改 `ListItem` 会让
-「学籍信息」那种多行值展示变难看（`InfoRow` 的标签+值两列反而更清楚）。
+真正剩下的缺口只有两条，都已改完：
+
+| 缺口 | 改法 | 结果 |
+|---|---|---|
+| 入口行是**手写 `Row`**（`Icon` + `Column{标题,摘要}` + 箭头 + `padding(14,12)` 凑出来），全应用 `ListItem` **0 处** | `ProfileScreen.NavRow` 内部换成 M3 `ListItem`（`leadingContent` / `headlineContent` / `supportingContent` / `trailingContent` 四个槽位） | ✅ 12 个入口行共用这一处实现 |
+| `SettingsGroup` 定义在 `ProfileScreen.kt`，而它的同类 `SectionCard` 在 `DetailParts.kt` —— 两个该分工的容器分居两处，没有地方写「什么时候用哪个」 | `SettingsGroup` 挪到 `DetailParts.kt`（`internal`），文件头补【分工规则】；两者互相 `@` 引用 | ✅ |
+
+**改完之后行高没变**：原来手算「正文 20 + 摘要 16 + 上下各 12 = 60dp」，M3 的两行 `ListItem`
+也是 `12 + 36 + 12 = 60dp`。变化只有三处，都是有意为之：
+左右内边距 14 → 16dp（M3 的 `ListItem` 规格）；分隔线从「`outline` @15% 透明度」换成 M3 默认的
+`HorizontalDivider()`（`outlineVariant`，比原来显眼一点，Pixel 设置页就是这样）；
+分组标题左内边距 4 → 16dp（与卡片内前导图标的左边缘对齐，原来错开一格）。
+
+**分工规则（已写进 `DetailParts.kt` 文件头，改页面前先读）**
+
+| 容器 | 用来装 | 例子 |
+|---|---|---|
+| `SectionCard` | **信息展示**：读回来的事实 | 学籍字段、会话状态、成绩统计、说明文字；内部用 `InfoRow` 的「标签 + 值」两列，长值能换行 |
+| `SettingsGroup` | **设置项**：用户能改的东西，一行一个 | 外观主题 / 字体 / 课表显示 / 周次校准 / 会话与保活 / 本地演练 / 诊断 / 关于 |
+| `HintCard` | 一段必须读到的说明 | 隐私说明、免责声明 |
+
+⚠️ **别一刀切全改 `ListItem`**：把 `InfoRow` 那种「标签 + 值」也塞进 `ListItem`，长值
+（家庭住址、学期规划的大段文字）会被挤成多行且无法对齐，反而不如现在的两列清楚。
+
+**刻意没做的一件事（留给你定）**：`ui/grade/GradeScreen.kt` 的成绩行（`Card` + 手写 `Row`，
+四段内容：课程名 / 学分·类别·状态标签 / 分数 / 绩点）也能 `ListItem` 化，但 M3 的两行行高下限是
+**56dp**，而它现在是约 48dp —— 一学期十几二十门课，一屏能少看两条。这条的取舍是「更合 M3 规格」
+对「成绩列表的单位屏信息量」，**我不替你定**。要改的话位置是 `GradeRow`。
 
 **A3 骨架层：加 `TopAppBar`（影响面最大，单独一批）**
 
@@ -274,7 +309,8 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 | `tools/verify_preferences.py` | 新增 4 个键 → 要扩 | ✅ 已扩；另加 §0「脚本常量 vs 源码」对齐节 |
 | 进程内自检 19 组 520 项 | `TimetableSizeSpec`（含穷举）、`ColorThemeSpec`、`JxauPalette` 三组要重算期望值 | ✅ 已重算并实跑：**263 项全绿**（新增 1 组字体链路） |
 | `tools/verify_p1_pages.py`、`verify_boot_restore.py`、`verify_course_palette.py` | P1 改了 6 个 UI 文件的控件与文案 → 理论上可能被字面量绑定 | ✅ **P1 无影响**：逐条 grep 过，没有一个依赖被改的控件/文案；纯逻辑一行未动 |
-| `tools/verify_ui_controls.py`（**P1 新增**） | 无既有资产覆盖「控件归位 + 颜色配对」→ 新增 | ✅ 15 项全 PASS；配套 `probe_ui_controls.py` 10 条变异全 CAUGHT |
+| P2 改的 `ProfileScreen.kt` / `DetailParts.kt` | 同上 | ✅ **P2 也无影响**：同样逐条 grep 过；`ProfileScreen` 没有对应的对账脚本，`DetailParts` 的零件被 `verify_p1_pages.py` 用到但只依赖显示的**文本内容**，两轮都没改过那些文案 |
+| `tools/verify_ui_controls.py`（**P1 新增，P2 扩到 23 项**） | 无既有资产覆盖「控件归位 + 颜色配对」→ 新增 | ✅ 23 项全 PASS（P2 又加了一节 §5 覆盖分组容器与列表行）；配套 `probe_ui_controls.py` 15 条变异全 CAUGHT |
 
 > **P1 的验证资产结论**：这轮改动全部落在 `ui/` 包（控件替换 + 一个共用组件抽取），
 > `data/` 与 `ui/theme/` 的纯逻辑一行没碰。所以「263 项自检」「32/32 主题对账」
@@ -318,11 +354,16 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 9. ✅ 自绘标签 → `StatusTag`（`Surface`，**不是 chip**；6 处）
 10. ✅ 图标 outlined/filled 配对
 11. ✅ 【清单外，顺手】修 `SelectionScreen`「已选」的容器色/文字色配对错误（见 §0.2）
-12. ✅ 【清单外，顺手】更正原清单第 5 / 7 / 9 条的三处误判（见 §0.1）
+12. ✅ 【清单外，顺手】更正原清单第 2 / 5 / 7 / 9 条共四处误判（见 §0.1）
 
-**P2 —— 骨架层（影响面最大，单独一批）**
-13. 设置页 `SectionCard` → 分组 + `ListItem`（保留信息型卡片）
-14. `TopAppBar`（按 §1.1 的取舍方案）
+**P2 —— 设置页行归位 —— ✅ 已完成（2026-09-22）**
+13. ✅ `NavRow` → M3 `ListItem`（贯穿全应用的 `ListItem` 0 处 → 有；12 个入口行共用一处实现）
+14. ✅ `SettingsGroup` 归位到 `DetailParts.kt`，与 `SectionCard` 同处维护，并写下分工规则
+15. ⏭️ 【刻意没做】`GradeScreen.GradeRow` 的 `ListItem` 化 —— 行高 48 → 56dp，
+    与「成绩列表单位屏信息量」冲突，**留给你定**（见 §1.1 A2 末尾）
+
+**P3 —— 骨架层（影响面最大，单独一批）**
+16. `TopAppBar`（按 §1.1 A3 的三选一，需要你拍板）
 
 ---
 
@@ -387,7 +428,7 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
      bash tools/probe_ui_controls.sh      # = verify_ui_controls.py + probe_ui_controls.py，外层再套一次独立进程 md5 复核
      ```
      结果：`verify_ui_controls.py` **15 项全 PASS**；`probe_ui_controls.py` **10 条变异 10 条 CAUGHT**，
-     真实源码 md5 未变。它查的是「改完之后应该是什么样」：
+     （P2 之后这两个数字变成 23 项 / 15 条，见第 4 条），真实源码 md5 未变。它查的是「改完之后应该是什么样」：
      - §0 配对判据自证（12 个已知好/坏样本，**含当时那个真 bug**）
      - §1 6 处 `StatusTag` 的容器色/内容色必须成套
      - §2 全部 `容器色 to 内容色` 配对成套（exam / rush 用这种写法）
@@ -403,7 +444,25 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
    - 真机部分（你跑）：登录页「访问通道」分段按钮三档、明暗模式三段、两个开关整行点击、
      底部导航切换时图标描边↔实心、选课页「课程/抢课任务」pill 指示器、
      以及**成绩页「不及格/补考」标签是否仍然清晰**（那处的半透明底是刻意保留的）。
-4. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
+4. **P2（设置页行归位）的验证 —— ✅ 离线部分已完成**：
+   - 编译：`:app:compileDebugKotlin --rerun-tasks` **零 `e:` 零 `w:`**（`tools/out/p2-compile.log`）。
+   - `tools/verify_ui_controls.py` 扩到 **23 项全 PASS**（新增 §5 覆盖分组容器与列表行）；
+     `probe_ui_controls.py` 扩到 **15 条变异 15 条 CAUGHT**（新增 5 条针对 §5 的：
+     把 `SettingsGroup` 复制回 `ProfileScreen`、把它改回 `private`、删掉前导图标色、
+     删掉 `fillMaxWidth()`、把入口行的手算内边距写回来）。
+   - `tools/kotlin-check/` 263 PASS / 0 FAIL（回归）；`verify_theme_palette` 32/32；
+     `verify_preferences` 全对上。P2 同样没让任何既有资产失效。
+   - ⚠️ 这轮**编译报错两回**，都是同一个 API 名字问题，值得记下来：
+     `ListItemDefaults.colors()` 的**参数**叫 `supportingColor`，而 `ListItemColors` 的**属性**
+     叫 `supportingTextColor`（M3 自己没对齐，两个名字在同一个类的 metadata 里都能 grep 到）。
+     写错的那个会直接报 `No parameter with name …` —— 属于响亮失败，不会静默走默认值。
+   - ⚠️ 探针当场抓出一个**我自己制造的假绿**：NavRow 的注释里写了「`.fillMaxWidth()` 不能省」，
+     于是删掉真正的 `fillMaxWidth()` 之后 `"fillMaxWidth()" in body` **照样为真**。
+     修法是断言前先 `strip_comments()`。**注释会进 grep，对工具也成立。**
+   - 真机部分（你跑）：首页四个分组的**入口行** —— 图标仍是主色、摘要仍是次要色（不是一层灰）、
+     行高与之前一致、点整行任意位置都能进子页（含最右侧箭头那一带）；分组标题与卡片内图标左对齐；
+     分隔线比之前略明显（有意）。
+5. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
 
 ### 新工具：离线纯函数自检（`tools/kotlin-check/`）
 
@@ -424,7 +483,7 @@ bash tools/kotlin-check/probe.sh   # 变异探针：逐个改坏副本，断言�
 ### 新工具：UI 控件静态对账 + 变异探针（`tools/verify_ui_controls.py` / `probe_ui_controls*`）
 
 ```bash
-python tools/verify_ui_controls.py          # 15 项静态断言；有 FAIL 退出码 1
+python tools/verify_ui_controls.py          # 23 项静态断言；有 FAIL 退出码 1
 python tools/probe_ui_controls.py           # 逐条改坏副本，断言上面的脚本必须报 FAIL
 bash   tools/probe_ui_controls.sh           # 上面两个 + 另起进程 md5 复核真实源码
 ```

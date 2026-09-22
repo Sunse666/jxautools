@@ -39,12 +39,12 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
@@ -1219,28 +1219,23 @@ private fun AboutPage(onBack: () -> Unit) {
 
 // ---------- 通用小件 ----------
 
-// `SectionCard` / `InfoRow` 已移到 DetailParts.kt（考试、学籍、导师、学期规划几个子页共用一份）
+// `SectionCard` / `InfoRow` / `SettingsGroup` 已移到 DetailParts.kt
+// （考试、学籍、导师、学期规划几个子页共用一份，文件头写了「信息展示 vs 设置项」的分工）
 
-/** 带标题的设置分组：一组入口行装在卡片里，行间自动加分隔线 */
-@Composable
-private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
-        )
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        ) {
-            Column { content() }
-        }
-    }
-}
-
-/** 入口行：图标 + 标题 + 当前值摘要 + 右侧箭头。[showDivider] 由调用方给，不靠页面身份去猜 */
+/**
+ * 设置分组的入口行：图标 + 标题 + 当前值摘要 + 右侧箭头。[showDivider] 由调用方给，
+ * 不靠页面身份去猜。
+ *
+ * ## 为什么用 `ListItem` 而不是手写 `Row`
+ * 这一行原本是 `Row { Icon; Column { Text; Text }; Icon }` 手搓出来的，靠 `padding` 凑。
+ * 换成 M3 的 [ListItem] 之后：
+ * - 行高、内边距、图标与文字的间距由 M3 保证（两行内容 = 60dp，与原来手算的正好一样）；
+ * - 无障碍树里标题与摘要是**同一行的一个节点**，不会被读成两段无关文字；
+ * - 前导/标题/摘要/尾随四个槽位有名字，后加一行不会再把间距写在两处。
+ *
+ * ⚠️ `summary` 为空时不传 `supportingContent`（`null` 而不是空 lambda）——
+ * 传空 lambda 会让 ListItem 按「两行行高」排版，撑出一条空白。
+ */
 @Composable
 private fun ColumnScope.NavRow(
     page: ProfilePage,
@@ -1250,38 +1245,46 @@ private fun ColumnScope.NavRow(
     showDivider: Boolean = true,
 ) {
     if (showDivider) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+        HorizontalDivider()
     }
-    Row(
+    ListItem(
+        // ⚠️ `fillMaxWidth()` 不能省：`ListItem` 内部**没有**自己撑满宽度
+        // （它只有 `minimumInteractiveComponentSize` + `sizeIn(minHeight)`），
+        // 在 Column 里会缩成内容宽度 —— 于是点击热区只剩文字那一块、右侧箭头浮在行中间。
+        // 手写 Row 时代这一条是靠 `.fillMaxWidth()` 保证的，换成 ListItem 后必须自己补。
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onOpen(page) }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            page.icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
+            .clickable { onOpen(page) },
+        headlineContent = {
             Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            if (summary.isNotBlank()) {
-                Text(
-                    summary,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-        )
-    }
+        },
+        supportingContent = if (summary.isNotBlank()) {
+            { Text(summary, style = MaterialTheme.typography.labelSmall) }
+        } else {
+            null
+        },
+        leadingContent = {
+            Icon(
+                page.icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+        },
+        trailingContent = {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent,
+            // 图标色与文字色显式给：ListItem 的默认值走的是 onSurfaceVariant，
+            // 而这里前导图标一直是主色、摘要一直是次要色 —— 不写就会一起变成灰色
+            leadingIconColor = MaterialTheme.colorScheme.primary,
+            trailingIconColor = MaterialTheme.colorScheme.outline,
+            // ⚠️ M3 自己名字没对齐：**属性**叫 supportingTextColor（`ListItemColors.supportingTextColor`），
+            // 但 **`colors()` 的参数**叫 supportingColor。写错的那个编译器会直接报
+            // “No parameter with name …”，属于响亮失败、不会静默走默认值。
+            supportingColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    )
 }
 
 @Composable

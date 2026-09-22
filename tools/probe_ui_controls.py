@@ -78,6 +78,36 @@ MUTATIONS = [
      "shape = MaterialTheme.shapes.extraSmall",
      "shape = RoundedCornerShape(4.dp)",
      "StatusTag 的圆角退回写死 4.dp（脱离 shapes 主题）"),
+
+    # ---- P2：设置分组与列表行 ----
+    ("profile/ProfileScreen.kt",
+     "@Composable\nprivate fun ColumnScope.NavRow(",
+     "@Composable\nprivate fun SettingsGroup(title: String) {}\n\n"
+     "@Composable\nprivate fun ColumnScope.NavRow(",
+     "有人把 SettingsGroup 容器复制回 ProfileScreen（两个容器该同处维护）"),
+
+    ("profile/DetailParts.kt",
+     "internal fun SettingsGroup(",
+     "private fun SettingsGroup(",
+     "SettingsGroup 改回 private，别的页用不了（分工规则也就失去唯一出口）"),
+
+    ("profile/ProfileScreen.kt",
+     "            leadingIconColor = MaterialTheme.colorScheme.primary,\n",
+     "",
+     "入口行删掉前导图标色 —— 图标会跟着摘要一起塌成灰色"),
+
+    ("profile/ProfileScreen.kt",
+     "        modifier = Modifier\n            .fillMaxWidth()\n            .clickable { onOpen(page) },",
+     "        modifier = Modifier.clickable { onOpen(page) },",
+     "入口行漏掉 fillMaxWidth（点击热区只剩文字、箭头浮在行中间）"),
+
+    ("profile/ProfileScreen.kt",
+     "        modifier = Modifier\n            .fillMaxWidth()\n"
+     "            .clickable { onOpen(page) },",
+     "        modifier = Modifier\n            .fillMaxWidth()\n"
+     "            .clickable { onOpen(page) }\n"
+     "            .padding(horizontal = 14.dp, vertical = 12.dp),",
+     "有人把入口行的手算内边距写回来（说明 ListItem 被绕过了）"),
 ]
 
 # 只改**检查脚本自己**的变异：验证 §0「配对判据自证」不是摆设。

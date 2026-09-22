@@ -2,6 +2,7 @@ package cn.edu.jxau.tools.ui.profile
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,9 +45,19 @@ internal fun fullDate(date: LocalDate): String =
  * 都是 `internal`，用它的有：`ui.profile` 及其子页（外观主题、字体、周次校准、考试、学籍、
  * 导师、学期规划），以及 `ui.grade` / `ui.selection` / `ui.rush` 这几个页（它们只是主 Tab
  * 不同，展示零件没必要各写一份）。
+ *
+ * ## 两种容器的分工（改页面前先读这一条）
+ * - **[SectionCard]：信息展示。** 内容是「读回来的事实」——学籍字段、会话状态、统计数字、
+ *   说明文字。内部用 [InfoRow] 的「标签 + 值」两列，长值能换行。
+ * - **[SettingsGroup]：设置项。** 内容是「用户能改的东西」，一行一个。
+ *   行用 M3 的 `ListItem` 做（见 `ProfileScreen.NavRow` 与 `LoginScreen` / `StudentScreen` 的开关行）。
+ * - **[HintCard]：一段必须读到的说明。**
+ *
+ * ⚠️ 别一刀切全改 `ListItem`：把 [InfoRow] 那种「标签 + 值」的展示也塞进 `ListItem`，
+ * 长值（比如家庭住址）会被挤成两三行且无法对齐，反而不如现在的两列清楚。
  */
 
-/** 带标题的卡片。内容是调用方的 Column 作用域，间距与内边距由这里统一 */
+/** 带标题的信息卡。内容是调用方的 Column 作用域，间距与内边距由这里统一 */
 @Composable
 internal fun SectionCard(title: String, content: @Composable () -> Unit) {
     Card(
@@ -57,6 +68,32 @@ internal fun SectionCard(title: String, content: @Composable () -> Unit) {
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             content()
+        }
+    }
+}
+
+/**
+ * 带标题的**设置**分组：小组标题 + 一个圆角容器内若干行。
+ *
+ * 这是 Pixel 设置页的形态，与 [SectionCard] 的区别见文件头那条分工。
+ *
+ * 标题的 `start` 取 **16.dp**：卡片内的 `ListItem` 前导图标左边缘正好落在 16dp 上，
+ * 标题跟它对齐（Pixel 设置页就是这么对的）。写成 4.dp 会与下面每一行的图标错开一格。
+ */
+@Composable
+internal fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, bottom = 6.dp),
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column { content() }
         }
     }
 }
