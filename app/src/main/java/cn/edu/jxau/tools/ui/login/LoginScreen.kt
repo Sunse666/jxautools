@@ -62,6 +62,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.JxauSession
+import cn.edu.jxau.tools.ui.motionHeight
 
 @Composable
 fun LoginScreen(viewModel: LoginViewModel = viewModel()) {
@@ -391,7 +392,10 @@ private fun LogCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (expanded) Modifier.height(200.dp) else Modifier),
+            .then(if (expanded) Modifier.height(200.dp) else Modifier)
+            // 展开 / 折叠平滑。这一页的根 Column 里，上面那块凭 `weight(1f)` 占剩余高度，
+            // 日志卡一变高它立刻被挤矮 —— 硬切会看到整页跳一下（时长见 `Motion.ResizeMillis`）
+            .motionHeight(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {

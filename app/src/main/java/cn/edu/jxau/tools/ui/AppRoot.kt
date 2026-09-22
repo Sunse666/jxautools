@@ -1,6 +1,5 @@
 package cn.edu.jxau.tools.ui
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -23,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +45,9 @@ import cn.edu.jxau.tools.ui.timetable.TimetableScreen
  * M1 只有两个 Tab 加一个底部弹窗，`when(tab)` 就够了，引入导航库属于为将来买单。
  * 等到抢课流程（课程列表 → 选课参数 → 提交确认）真的需要回退栈时再引入——
  * 那时它才有明确的职责，而不是现在先摆着。
+ *
+ * ## 门禁切换用「状态互换」而不是滑动
+ * 登录成功与掉线续期都不是「翻到下一页」——它们没有前后方向。见 [MotionSwap]。
  */
 @Composable
 fun AppRoot() {
@@ -53,10 +56,12 @@ fun AppRoot() {
     val repo = remember(appContext) { SessionRepository.get(appContext) }
     val session by repo.session.collectAsState()
 
-    if (session?.isUsable == true) {
-        MainShell()
-    } else {
-        LoginScreen()
+    MotionSwap(
+        target = session?.isUsable == true,
+        label = "登录门禁",
+        modifier = Modifier.fillMaxSize(),
+    ) { loggedIn ->
+        if (loggedIn) MainShell() else LoginScreen()
     }
 }
 
@@ -89,6 +94,13 @@ private fun MainShell() {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val tabs = remember { Tab.entries.toList() }
 
+    // 每个 Tab 的状态各自留档。**这一行不是可选的**：
+    // `AnimatedContent`（[MotionPager]）在过渡结束后会把上一个 Tab 移出组合树，
+    // 那上面的 `rememberSaveable`（列表滚动位置、抢课任务展开状态）随之消失 ——
+    // 表现是「切走再切回来，位置回到顶部」。加了动画反而比不加更差，
+    // 而每一处看起来都正常（不报错、不崩溃）。靠 `verify_motion.py` 守着。
+    val tabStates = rememberSaveableStateHolder()
+
     // ⚠️ 顶栏**不在这里**，而是各页自己画（`ui/AppBars.kt` 的 JxauTopBar）。三个理由：
     // 1. 「我的」页的子页与首页各有各的标题与返回按钮，放在这里就得把子页状态提到这一层；
     // 2. 状态栏高度只由这里的 Scaffold 发一次（`contentPadding`），顶栏自己不再吃内边距；
@@ -114,16 +126,23 @@ private fun MainShell() {
             }
         },
     ) { padding ->
-        Box(
+        MotionPager(
+            target = tabs[selected],
+            label = "底部导航",
+            // 方向按 Tab 在导航栏里的左右次序判断 —— 从状态本身算出来，
+            // 不维护一个「上次选了哪个」的额外变量（那种变量迟早会忘记更新）。
+            forward = { from, to -> to.ordinal > from.ordinal },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-        ) {
-            when (tabs[selected]) {
-                Tab.Timetable -> TimetableScreen()
-                Tab.Selection -> SelectionScreen()
-                Tab.Grade -> GradeScreen()
-                Tab.Profile -> ProfileScreen()
+        ) { tab ->
+            tabStates.SaveableStateProvider(tab.name) {
+                when (tab) {
+                    Tab.Timetable -> TimetableScreen()
+                    Tab.Selection -> SelectionScreen()
+                    Tab.Grade -> GradeScreen()
+                    Tab.Profile -> ProfileScreen()
+                }
             }
         }
     }

@@ -41,6 +41,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.export.ExamIcs
 import cn.edu.jxau.tools.data.model.ExamItem
+import cn.edu.jxau.tools.ui.MotionSwap
+import cn.edu.jxau.tools.ui.motionPhase
 import cn.edu.jxau.tools.ui.profile.DetailScaffold
 import cn.edu.jxau.tools.ui.profile.StatusTag
 import kotlinx.coroutines.Dispatchers
@@ -105,35 +107,56 @@ fun ExamScreen(onBack: () -> Unit, viewModel: ExamViewModel = viewModel()) {
     }
 
     DetailScaffold(title = "考试安排", onBack = onBack) {
+        // 学期条**不参与**过渡：它是这一页的导航，切换学期时该待在原地不动
         TermBar(state = state, onSelect = viewModel::selectTerm)
 
-        when (state.phase) {
-            ExamUiState.Phase.Idle, ExamUiState.Phase.Loading -> CenterBox {
-                CircularProgressIndicator(modifier = Modifier.size(28.dp))
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    state.message.ifBlank { "正在读取考试安排…" },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+        MotionSwap(
+            target = motionPhase(
+                state.phase,
+                ExamUiState.Phase.Idle,
+                ExamUiState.Phase.Loading,
+            ),
+            label = "考试内容",
+            // `DetailScaffold` 的内容在 `verticalScroll` 里，纵向约束无限 —— 只能定宽，不能定高
+            modifier = Modifier.fillMaxWidth(),
+        ) { phase ->
+            when (phase) {
+                ExamUiState.Phase.Idle, ExamUiState.Phase.Loading -> CenterBox {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        state.message.ifBlank { "正在读取考试安排…" },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
 
-            ExamUiState.Phase.Failed -> CenterBox {
-                Text(
-                    state.message.ifBlank { "读取失败" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = viewModel::retry) { Text("重试") }
-            }
+                ExamUiState.Phase.Failed -> CenterBox {
+                    Text(
+                        state.message.ifBlank { "读取失败" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = viewModel::retry) { Text("重试") }
+                }
 
-            ExamUiState.Phase.Ready -> if (state.total == 0) {
-                EmptyCard()
-            } else {
-                Summary(state = state, exporting = exporting, note = exportNote, onExport = { export() })
-                state.dated.forEach { exam -> ExamCard(exam) }
-                if (state.undated.isNotEmpty()) UndatedSection(items = state.undated)
+                ExamUiState.Phase.Ready -> if (state.total == 0) {
+                    EmptyCard()
+                } else {
+                    // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排 ——
+                    // 原来靠 `DetailScaffold` 的 `ColumnScope` 排，包进来之后就没有了
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Summary(
+                            state = state,
+                            exporting = exporting,
+                            note = exportNote,
+                            onExport = { export() },
+                        )
+                        state.dated.forEach { exam -> ExamCard(exam) }
+                        if (state.undated.isNotEmpty()) UndatedSection(items = state.undated)
+                    }
+                }
             }
         }
     }

@@ -1,7 +1,9 @@
 package cn.edu.jxau.tools.ui.advisor
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -17,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.data.model.AdvisorRecord
+import cn.edu.jxau.tools.ui.MotionSwap
+import cn.edu.jxau.tools.ui.motionPhase
 import cn.edu.jxau.tools.ui.profile.DetailScaffold
 import cn.edu.jxau.tools.ui.profile.HintCard
 import cn.edu.jxau.tools.ui.profile.InfoRow
@@ -43,33 +47,47 @@ fun AdvisorScreen(onBack: () -> Unit, viewModel: AdvisorViewModel = viewModel())
     LaunchedEffect(Unit) { viewModel.load() }
 
     DetailScaffold(title = "导师信息", onBack = onBack) {
-        when (state.phase) {
-            AdvisorUiState.Phase.Idle, AdvisorUiState.Phase.Loading ->
-                LoadingBox(state.message.ifBlank { "正在读取导师信息…" })
+        MotionSwap(
+            target = motionPhase(
+                state.phase,
+                AdvisorUiState.Phase.Idle,
+                AdvisorUiState.Phase.Loading,
+            ),
+            label = "导师内容",
+            // `DetailScaffold` 的内容在 `verticalScroll` 里，纵向约束无限 —— 只能定宽，不能定高
+            modifier = Modifier.fillMaxWidth(),
+        ) { phase ->
+            when (phase) {
+                AdvisorUiState.Phase.Idle, AdvisorUiState.Phase.Loading ->
+                    LoadingBox(state.message.ifBlank { "正在读取导师信息…" })
 
-            AdvisorUiState.Phase.Failed ->
-                RetryBox(message = state.message, onRetry = viewModel::retry)
+                AdvisorUiState.Phase.Failed ->
+                    RetryBox(message = state.message, onRetry = viewModel::retry)
 
-            AdvisorUiState.Phase.Ready -> {
-                if (state.records.isEmpty()) {
-                    SectionCard("导师安排") {
-                        Text("学校还没有给你安排导师组。", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "导师组由学院分配，一般入学后一段时间才出来。这里没有内容是正常状态，" +
-                                "不是读取失败。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    state.records.forEach { record -> AdvisorCard(record) }
+                AdvisorUiState.Phase.Ready -> {
+                    if (state.records.isEmpty()) {
+                        SectionCard("导师安排") {
+                            Text("学校还没有给你安排导师组。", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "导师组由学院分配，一般入学后一段时间才出来。这里没有内容是正常状态，" +
+                                    "不是读取失败。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            state.records.forEach { record -> AdvisorCard(record) }
 
-                    if (state.noExtra) {
-                        HintCard(
-                            "「擅长领域」与「学员要求」这两项，学校目前没有填写 —— " +
-                                "教务网站上的同一页也是空的。不是 App 没读到。"
-                        )
+                            if (state.noExtra) {
+                                HintCard(
+                                    "「擅长领域」与「学员要求」这两项，学校目前没有填写 —— " +
+                                        "教务网站上的同一页也是空的。不是 App 没读到。"
+                                )
+                            }
+                        }
                     }
                 }
             }

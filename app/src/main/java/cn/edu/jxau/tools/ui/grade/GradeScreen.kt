@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -46,7 +46,10 @@ import cn.edu.jxau.tools.data.model.GradeSummary
 import cn.edu.jxau.tools.data.model.PassState
 import cn.edu.jxau.tools.data.model.TermGrades
 import cn.edu.jxau.tools.ui.JxauTopBar
+import cn.edu.jxau.tools.ui.MotionSwap
 import cn.edu.jxau.tools.ui.jxauTopBarScroll
+import cn.edu.jxau.tools.ui.motionItem
+import cn.edu.jxau.tools.ui.motionPhase
 import cn.edu.jxau.tools.ui.profile.StatusTag
 import cn.edu.jxau.tools.ui.rememberJxauTopBarScrollBehavior
 
@@ -80,46 +83,59 @@ fun GradeScreen(viewModel: GradeViewModel = viewModel()) {
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
-            when (state.phase) {
-                GradeUiState.Phase.Idle, GradeUiState.Phase.Loading -> CenterBox {
-                    CircularProgressIndicator(modifier = Modifier.size(30.dp))
-                    Spacer(Modifier.height(10.dp))
-                    Text(state.message.ifBlank { "正在读取成绩…" }, style = MaterialTheme.typography.bodyMedium)
-                }
-
-                GradeUiState.Phase.Failed -> CenterBox {
-                    Text(
-                        state.message.ifBlank { "读取失败" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
-                }
-
-                GradeUiState.Phase.Ready -> {
-                    val summary = state.summary
-                    if (summary == null || summary.isEmpty) {
-                        CenterBox {
-                            Text(
-                                state.message.ifBlank { "没有查询到成绩记录。" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 24.dp),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
-                        }
-                    } else {
-                        GradeList(
-                            summary = summary,
-                            visibleTerms = state.visibleTerms,
-                            onlyFailed = state.onlyFailed,
-                            onToggleFilter = viewModel::toggleOnlyFailed,
-                            onPick = viewModel::showDetail,
+            MotionSwap(
+                target = motionPhase(
+                    state.phase,
+                    GradeUiState.Phase.Idle,
+                    GradeUiState.Phase.Loading,
+                ),
+                label = "成绩内容",
+                modifier = Modifier.fillMaxSize(),
+            ) { phase ->
+                when (phase) {
+                    GradeUiState.Phase.Idle, GradeUiState.Phase.Loading -> CenterBox {
+                        CircularProgressIndicator(modifier = Modifier.size(30.dp))
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            state.message.ifBlank { "正在读取成绩…" },
+                            style = MaterialTheme.typography.bodyMedium,
                         )
+                    }
+
+                    GradeUiState.Phase.Failed -> CenterBox {
+                        Text(
+                            state.message.ifBlank { "读取失败" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
+                    }
+
+                    GradeUiState.Phase.Ready -> {
+                        val summary = state.summary
+                        if (summary == null || summary.isEmpty) {
+                            CenterBox {
+                                Text(
+                                    state.message.ifBlank { "没有查询到成绩记录。" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 24.dp),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
+                            }
+                        } else {
+                            GradeList(
+                                summary = summary,
+                                visibleTerms = state.visibleTerms,
+                                onlyFailed = state.onlyFailed,
+                                onToggleFilter = viewModel::toggleOnlyFailed,
+                                onPick = viewModel::showDetail,
+                            )
+                        }
                     }
                 }
             }
@@ -183,10 +199,20 @@ private fun GradeList(
 
         visibleTerms.forEach { term ->
             item(key = "header-${term.termCode}") { TermHeader(term, filtered = onlyFailed) }
-            // 刻意不用 key：term+courseCode+examCategory 理论上可能重复，
-            // 而重复 key 在 LazyColumn 里是**运行时崩溃**，不值得为省几次重组冒这个险
-            items(term.items) { grade ->
-                GradeRow(grade = grade, onClick = { onPick(grade) })
+            // key 里带**组内下标**，而不是「学期 + 课程号 + 考试类别」三元组：
+            // 后者理论上可能重复，而重复 key 在 LazyColumn 里是**运行时崩溃** ——
+            // 拿一个理论上会崩的 key 去换动画不值当（原来的注释就是这么写的，这里保持）。
+            // 下标在同一个 term 内天然唯一，**永远不会崩**；服务端返回顺序在两次加载之间稳定，
+            // 所以刷新时动画也是对的。极端情况下顺序变了，后果只是动画认错项，不会崩。
+            itemsIndexed(term.items, key = { index, _ -> "${term.termCode}#$index" }) { _, grade ->
+                GradeRow(
+                    grade = grade,
+                    onClick = { onPick(grade) },
+                    // ⚠️ 有 key 才有效果：没 key 时 LazyColumn 按下标认项，
+                    // 数据一变只当「第 n 项内容变了」，位置动画无从谈起（不报错、不崩溃、就是没有）
+                    // 写法是 `motionItem()`（receiver 是这个 `LazyItemScope`），不是 `Modifier.motionItem()`
+                    modifier = motionItem(),
+                )
             }
         }
     }
@@ -312,10 +338,10 @@ private fun TermHeader(term: TermGrades, filtered: Boolean) {
 }
 
 @Composable
-private fun GradeRow(grade: GradeItem, onClick: () -> Unit) {
+private fun GradeRow(grade: GradeItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val failed = grade.passState == PassState.FAILED
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(

@@ -38,6 +38,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +52,11 @@ import cn.edu.jxau.tools.data.model.RushState
 import cn.edu.jxau.tools.data.model.SelectionScope
 import cn.edu.jxau.tools.data.model.SelectionStats
 import cn.edu.jxau.tools.ui.JxauTopBar
+import cn.edu.jxau.tools.ui.MotionPager
+import cn.edu.jxau.tools.ui.MotionSwap
 import cn.edu.jxau.tools.ui.jxauTopBarScroll
+import cn.edu.jxau.tools.ui.motionItem
+import cn.edu.jxau.tools.ui.motionPhase
 import cn.edu.jxau.tools.ui.profile.StatusTag
 import cn.edu.jxau.tools.ui.rememberJxauTopBarScrollBehavior
 import cn.edu.jxau.tools.ui.rush.RushScreen
@@ -75,6 +80,10 @@ fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
     var tabName by rememberSaveable { mutableStateOf(SelectionTab.COURSES.name) }
     val tab = SelectionTab.of(tabName)
     val tasks by viewModel.rushTasks.collectAsState()
+
+    // 两半各自的滚动位置要留住：切换时 `AnimatedContent` 会把上一半移出组合树，
+    // 那里的 `rememberSaveable` 跟着消失（理由见 `MotionPager` 的说明）
+    val tabStates = rememberSaveableStateHolder()
 
     // 顶栏可折叠：向下滚收起、向上滚回来（接线见 Modifier.jxauTopBarScroll）。
     // 「课程 / 抢课任务」那排标签**不跟着收**——它是这一页的导航，不该滚走。
@@ -100,13 +109,24 @@ fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
                 .weight(1f)
                 .fillMaxWidth(),
         ) {
-            when (tab) {
-                SelectionTab.COURSES -> SelectionCourses(
-                    viewModel = viewModel,
-                    onGoRush = { tabName = SelectionTab.RUSH.name },
-                )
+            MotionPager(
+                target = tab,
+                label = "选课两半",
+                // 「课程」在左、「抢课任务」在右（就是标签行里看到的位置）—— 方向从枚举顺序算出来，
+                // 不另存一个「上一半是谁」的变量
+                forward = { from, to -> to.ordinal > from.ordinal },
+                modifier = Modifier.fillMaxSize(),
+            ) { current ->
+                tabStates.SaveableStateProvider(current.name) {
+                    when (current) {
+                        SelectionTab.COURSES -> SelectionCourses(
+                            viewModel = viewModel,
+                            onGoRush = { tabName = SelectionTab.RUSH.name },
+                        )
 
-                SelectionTab.RUSH -> RushScreen(modifier = Modifier.fillMaxSize())
+                        SelectionTab.RUSH -> RushScreen(modifier = Modifier.fillMaxSize())
+                    }
+                }
             }
         }
     }
@@ -166,26 +186,39 @@ private fun SelectionCourses(viewModel: SelectionViewModel, onGoRush: () -> Unit
 
     LaunchedEffect(Unit) { viewModel.load() }
 
-    when (state.phase) {
-        SelectionUiState.Phase.Idle, SelectionUiState.Phase.Loading -> CenterBox {
-            CircularProgressIndicator(modifier = Modifier.size(30.dp))
-            Spacer(Modifier.height(10.dp))
-            Text(state.message.ifBlank { "正在读取课程…" }, style = MaterialTheme.typography.bodyMedium)
-        }
+    MotionSwap(
+        target = motionPhase(
+            state.phase,
+            SelectionUiState.Phase.Idle,
+            SelectionUiState.Phase.Loading,
+        ),
+        label = "课程内容",
+        modifier = Modifier.fillMaxSize(),
+    ) { phase ->
+        when (phase) {
+            SelectionUiState.Phase.Idle, SelectionUiState.Phase.Loading -> CenterBox {
+                CircularProgressIndicator(modifier = Modifier.size(30.dp))
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    state.message.ifBlank { "正在读取课程…" },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
 
-        SelectionUiState.Phase.Failed -> CenterBox {
-            Text(
-                state.message.ifBlank { "读取失败" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
-        }
+            SelectionUiState.Phase.Failed -> CenterBox {
+                Text(
+                    state.message.ifBlank { "读取失败" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
+            }
 
-        SelectionUiState.Phase.Ready -> SelectionBody(state, viewModel, onGoRush)
+            SelectionUiState.Phase.Ready -> SelectionBody(state, viewModel, onGoRush)
+        }
     }
 
     state.confirm?.let { course ->
@@ -259,6 +292,9 @@ private fun SelectionBody(state: SelectionUiState, viewModel: SelectionViewModel
                         enabled = state.canActOn(course),
                         onAction = { viewModel.requestAction(course) },
                         onRush = { viewModel.addRushTask(course) },
+                        // 有 key 才有位移效果；这里的 key 是班号，本来就有（见上面的 items）。
+                        // 写法是 `motionItem()` —— 它挂在 `LazyItemScope` 上，不是 Modifier 扩展
+                        modifier = motionItem(),
                     )
                 }
             }
@@ -472,9 +508,10 @@ private fun CourseRow(
     enabled: Boolean,
     onAction: () -> Unit,
     onRush: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (course.selected) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceVariant,

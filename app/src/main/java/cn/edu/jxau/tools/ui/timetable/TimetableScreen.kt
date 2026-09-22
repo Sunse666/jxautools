@@ -49,6 +49,8 @@ import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.LessonGrid
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
+import cn.edu.jxau.tools.ui.MotionSwap
+import cn.edu.jxau.tools.ui.motionPhase
 
 private val TIGHT_PADDING = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
@@ -67,49 +69,81 @@ fun TimetableScreen(viewModel: TimetableViewModel = viewModel()) {
     Column(modifier = Modifier.fillMaxSize()) {
         Header(state = state, onGotoToday = viewModel::gotoToday, onSelectTerm = viewModel::selectTerm)
 
-        when (state.phase) {
-            TimetableUiState.Phase.Idle, TimetableUiState.Phase.Loading -> CenterBox {
-                CircularProgressIndicator(modifier = Modifier.size(30.dp))
-                Spacer(Modifier.height(10.dp))
-                Text(state.message.ifBlank { "正在读取课表…" }, style = MaterialTheme.typography.bodyMedium)
-            }
-
-            TimetableUiState.Phase.Failed -> CenterBox {
-                Text(
-                    state.message.ifBlank { "读取失败" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
-            }
-
-            TimetableUiState.Phase.Ready -> {
-                val grid = state.grid
-                if (grid == null || grid.periodCount <= 0) {
-                    CenterBox {
+        // ⚠️ 这层 `Box(weight(1f))` 不能省（与成绩页同一个理由）：`MotionSwap` 内部的
+        // `AnimatedContent` 是普通 Box，拿不到 `ColumnScope`，里面的内容就没有 `weight` 可用。
+        // 把「表头以下的剩余空间」在这里显式框出来，里面一律 `fillMaxSize()` —— 免得去赌
+        // 「非 weight 子项拿到的最大高度是整页还是剩余」（赌错的表现是课表整体多出一个表头的高度、
+        // 最后两节被底部导航盖住；能编译、能滚、看不出是布局错了）。
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            MotionSwap(
+                target = motionPhase(
+                    state.phase,
+                    TimetableUiState.Phase.Idle,
+                    TimetableUiState.Phase.Loading,
+                ),
+                label = "课表内容",
+                modifier = Modifier.fillMaxSize(),
+            ) { phase ->
+                when (phase) {
+                    TimetableUiState.Phase.Idle, TimetableUiState.Phase.Loading -> CenterBox {
+                        CircularProgressIndicator(modifier = Modifier.size(30.dp))
+                        Spacer(Modifier.height(10.dp))
                         Text(
-                            state.message.ifBlank { "这个学期没有课程。" },
+                            state.message.ifBlank { "正在读取课表…" },
                             style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+
+                    TimetableUiState.Phase.Failed -> CenterBox {
+                        Text(
+                            state.message.ifBlank { "读取失败" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 24.dp),
                         )
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
+                        Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
                     }
-                } else {
-                    DataWarnings(grid, state.anchorReliable, state.anchorLine)
-                    WeekBar(state = state, onPrev = { viewModel.goWeek(-1) }, onNext = { viewModel.goWeek(1) })
-                    WeekTable(
-                        grid = grid,
-                        week = state.week,
-                        todayWeek = state.todayWeek,
-                        size = prefs.timetableSize,
-                        onPick = viewModel::showDetail,
-                        modifier = Modifier.weight(1f),
-                    )
+
+                    TimetableUiState.Phase.Ready -> {
+                        val grid = state.grid
+                        if (grid == null || grid.periodCount <= 0) {
+                            CenterBox {
+                                Text(
+                                    state.message.ifBlank { "这个学期没有课程。" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 24.dp),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
+                            }
+                        } else {
+                            // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排，
+                            // 否则警示卡 / 周次条 / 课表会全叠在同一块地方
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                DataWarnings(grid, state.anchorReliable, state.anchorLine)
+                                WeekBar(
+                                    state = state,
+                                    onPrev = { viewModel.goWeek(-1) },
+                                    onNext = { viewModel.goWeek(1) },
+                                )
+                                WeekTable(
+                                    grid = grid,
+                                    week = state.week,
+                                    todayWeek = state.todayWeek,
+                                    size = prefs.timetableSize,
+                                    onPick = viewModel::showDetail,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -375,12 +409,17 @@ private fun DetailLine(label: String, value: String) {
 
 // ---------- 小工具 ----------
 
+/**
+ * 居中的加载 / 失败 / 空态。
+ *
+ * ⚠️ 从 `ColumnScope` 扩展改成了普通组件：它现在住在 [MotionSwap] 的内容里，
+ * 而 `AnimatedContent` 不提供 `ColumnScope`。所以这里用 `fillMaxSize()` 而不是 `weight(1f)`，
+ * 由外面那层 `Box(weight(1f))` 给出确定的高度（在 `verticalScroll` 里 `fillMaxSize()` 会塌成 0）。
+ */
 @Composable
-private fun ColumnScope.CenterBox(content: @Composable () -> Unit) {
+private fun CenterBox(content: @Composable () -> Unit) {
     Box(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) { content() }

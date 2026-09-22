@@ -52,6 +52,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
+    // 过渡动画（`AnimatedContent` / `animateContentSize` / `animateItem`）。
+    // foundation 会把它作为传递依赖带进来，但这里**显式声明**：过渡动画是本应用
+    // 交互约定的一部分（唯一入口见 `ui/Motion.kt`），不该依赖「别人顺手带进来」。
+    // 版本仍由上面的 BOM 管。
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")

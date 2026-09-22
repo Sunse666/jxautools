@@ -33,6 +33,8 @@ import cn.edu.jxau.tools.data.model.PlanBook
 import cn.edu.jxau.tools.data.model.PlanItem
 import cn.edu.jxau.tools.data.model.TermPlan
 import cn.edu.jxau.tools.data.model.WeekMath
+import cn.edu.jxau.tools.ui.MotionSwap
+import cn.edu.jxau.tools.ui.motionPhase
 import cn.edu.jxau.tools.ui.profile.DetailScaffold
 import cn.edu.jxau.tools.ui.profile.InfoRow
 import cn.edu.jxau.tools.ui.profile.LoadingBox
@@ -61,28 +63,42 @@ fun PlanScreen(onBack: () -> Unit, viewModel: PlanViewModel = viewModel()) {
     LaunchedEffect(Unit) { viewModel.load() }
 
     DetailScaffold(title = "学期规划", onBack = onBack) {
-        when (state.phase) {
-            PlanUiState.Phase.Idle, PlanUiState.Phase.Loading ->
-                LoadingBox(state.message.ifBlank { "正在读取学期规划…" })
+        MotionSwap(
+            target = motionPhase(
+                state.phase,
+                PlanUiState.Phase.Idle,
+                PlanUiState.Phase.Loading,
+            ),
+            label = "规划内容",
+            // `DetailScaffold` 的内容在 `verticalScroll` 里，纵向约束无限 —— 只能定宽，不能定高
+            modifier = Modifier.fillMaxWidth(),
+        ) { phase ->
+            when (phase) {
+                PlanUiState.Phase.Idle, PlanUiState.Phase.Loading ->
+                    LoadingBox(state.message.ifBlank { "正在读取学期规划…" })
 
-            PlanUiState.Phase.Failed ->
-                RetryBox(message = state.message, onRetry = viewModel::retry)
+                PlanUiState.Phase.Failed ->
+                    RetryBox(message = state.message, onRetry = viewModel::retry)
 
-            PlanUiState.Phase.Ready -> {
-                if (state.plans.isEmpty()) {
-                    SectionCard("学期规划") {
-                        Text("还没有任何学期的规划记录。", style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "学期规划由学生本人填写、导师批阅，两个环节都做完了才会在这里出现。" +
-                                "一条都没有是正常状态，不是读取失败。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                PlanUiState.Phase.Ready -> {
+                    if (state.plans.isEmpty()) {
+                        SectionCard("学期规划") {
+                            Text("还没有任何学期的规划记录。", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "学期规划由学生本人填写、导师批阅，两个环节都做完了才会在这里出现。" +
+                                    "一条都没有是正常状态，不是读取失败。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            TermChips(state = state, onSelect = viewModel::selectTerm)
+                            state.current?.let { plan -> PlanBody(plan = plan, state = state) }
+                        }
                     }
-                } else {
-                    TermChips(state = state, onSelect = viewModel::selectTerm)
-                    state.current?.let { plan -> PlanBody(plan = plan, state = state) }
                 }
             }
         }

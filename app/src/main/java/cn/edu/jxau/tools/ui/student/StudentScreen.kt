@@ -31,6 +31,8 @@ import cn.edu.jxau.tools.data.model.Privacy
 import cn.edu.jxau.tools.data.model.ProfileField
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.XueJiChange
+import cn.edu.jxau.tools.ui.MotionSwap
+import cn.edu.jxau.tools.ui.motionPhase
 import cn.edu.jxau.tools.ui.profile.DetailScaffold
 import cn.edu.jxau.tools.ui.profile.InfoRow
 import cn.edu.jxau.tools.ui.profile.LoadingBox
@@ -58,37 +60,52 @@ fun StudentScreen(onBack: () -> Unit, viewModel: StudentViewModel = viewModel())
     LaunchedEffect(Unit) { viewModel.load() }
 
     DetailScaffold(title = "学籍信息", onBack = onBack) {
-        when (state.phase) {
-            StudentUiState.Phase.Idle, StudentUiState.Phase.Loading ->
-                LoadingBox(state.message.ifBlank { "正在读取学籍档案…" })
+        MotionSwap(
+            target = motionPhase(
+                state.phase,
+                StudentUiState.Phase.Idle,
+                StudentUiState.Phase.Loading,
+            ),
+            label = "学籍内容",
+            // `DetailScaffold` 的内容在 `verticalScroll` 里，纵向约束无限 —— 只能定宽，不能定高
+            modifier = Modifier.fillMaxWidth(),
+        ) { phase ->
+            when (phase) {
+                StudentUiState.Phase.Idle, StudentUiState.Phase.Loading ->
+                    LoadingBox(state.message.ifBlank { "正在读取学籍档案…" })
 
-            StudentUiState.Phase.Failed ->
-                RetryBox(message = state.message, onRetry = viewModel::retry)
+                StudentUiState.Phase.Failed ->
+                    RetryBox(message = state.message, onRetry = viewModel::retry)
 
-            StudentUiState.Phase.Ready -> {
-                if (state.hasSensitive) {
-                    PrivacyBar(reveal = reveal, onToggle = { reveal = !reveal })
-                }
-
-                state.groups.forEach { group ->
-                    SectionCard(group.title) {
-                        group.fields.forEach { field ->
-                            InfoRow(
-                                label = field.label,
-                                value = if (field.sensitive && !reveal) {
-                                    Privacy.maskByKey(field.key, field.value)
-                                } else {
-                                    field.value
-                                },
-                            )
+                StudentUiState.Phase.Ready -> {
+                    // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排 ——
+                    // 原来靠 `DetailScaffold` 的 `ColumnScope` 排，包进来之后就没有了
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        if (state.hasSensitive) {
+                            PrivacyBar(reveal = reveal, onToggle = { reveal = !reveal })
                         }
+
+                        state.groups.forEach { group ->
+                            SectionCard(group.title) {
+                                group.fields.forEach { field ->
+                                    InfoRow(
+                                        label = field.label,
+                                        value = if (field.sensitive && !reveal) {
+                                            Privacy.maskByKey(field.key, field.value)
+                                        } else {
+                                            field.value
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        ChangesSection(
+                            changes = state.changes,
+                            failed = state.changesFailed,
+                        )
                     }
                 }
-
-                ChangesSection(
-                    changes = state.changes,
-                    failed = state.changesFailed,
-                )
             }
         }
     }

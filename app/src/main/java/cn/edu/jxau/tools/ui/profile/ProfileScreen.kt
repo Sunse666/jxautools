@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,6 +88,7 @@ import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.ui.JxauTopBar
+import cn.edu.jxau.tools.ui.MotionPager
 import cn.edu.jxau.tools.ui.advisor.AdvisorScreen
 import cn.edu.jxau.tools.ui.exam.ExamScreen
 import cn.edu.jxau.tools.ui.jxauTopBarScroll
@@ -143,11 +145,41 @@ fun ProfileScreen(viewModel: ProfileViewModel = viewModel()) {
     // 系统返回键要能退出子页，否则只能点左上角返回
     BackHandler(enabled = page != null) { pageName = null }
 
-    when (page) {
-        null -> ProfileHub(viewModel = viewModel, onOpen = { pageName = it.name })
-        else -> ProfileSubPage(page = page, viewModel = viewModel, onBack = { pageName = null })
+    // 子页的滚动位置要留住：切换时 `AnimatedContent` 会把上一页移出组合树（理由见 `MotionPager`）。
+    // 效果上这也是这一页最明显的一处改善 —— 从「学籍」退回首页再进去，原来会回到顶部。
+    val pageStates = rememberSaveableStateHolder()
+
+    // 过渡的目标值用**页名字符串**（空串 = 首页），不用 `ProfilePage?`：
+    // `AnimatedContent` 的 `contentKey` 默认取目标值本身，可空值当状态标识不可靠。
+    val target = page?.name.orEmpty()
+
+    MotionPager(
+        target = target,
+        label = "我的子页",
+        // 首页在「外面」、子页在「里面」：进子页 = 新页从右进（前进），回首页 = 从左边退回来（后退）。
+        // 两个子页直接互跳（学期规划那对）按枚举里的次序判方向。
+        forward = { from, to ->
+            when {
+                from.isEmpty() -> true
+                to.isEmpty() -> false
+                else -> ordinalOf(to) > ordinalOf(from)
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) { name ->
+        pageStates.SaveableStateProvider(name) {
+            val current = ProfilePage.of(name)
+            if (current == null) {
+                ProfileHub(viewModel = viewModel, onOpen = { pageName = it.name })
+            } else {
+                ProfileSubPage(page = current, viewModel = viewModel, onBack = { pageName = null })
+            }
+        }
     }
 }
+
+/** 认不出的页名按 0 算 —— 它只会出现在「枚举里删了一个子页、而 `pageName` 是旧值」时 */
+private fun ordinalOf(pageName: String): Int = ProfilePage.of(pageName)?.ordinal ?: 0
 
 /** 「我的」页的子项清单。新增设置项 = 在这里加一行 */
 private enum class ProfilePage(val title: String, val icon: ImageVector) {
