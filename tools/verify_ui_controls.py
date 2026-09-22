@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""UI 控件归位静态对账（P1）。
+
+## 为什么需要这个脚本
+
+P1 做的是一批「不会编译报错、也不会被运行时自检发现」的改动：
+
+1. **容器色与内容色配错**。`SelectionScreen` 的「已选」标签曾经是
+   `container = secondary` + `content = onSecondaryContainer` —— 浅色主题下两者相对亮度
+   0.100 与 0.030，对比度约 1.9，深底写深字，实际读不出来。两个颜色各自都合法，
+   Kotlin 编译器不管，`core/SelfTest.kt` 也看不到 UI 层源码。**只能静态查**。
+2. **控件被改回去**。`TabRow` / 竖排 `RadioButton` / `Checkbox` 这些东西一旦有人再写回来，
+   没有任何东西会拦他 —— 除非有一条断言写着「这几样现在是 0 处」。
+
+所以这个脚本断言的是 **P1 的「改完之后应该是什么样」**，不是「代码能跑」。
+它同时自带一组**已知坏样本**做自证（见 §0），否则「全部 PASS」可能只是查了个空。
+
+## 已知局限（写出来，免得被当成保证）
+
+- 注释里的字面量也会被 grep 到 —— 所以下面几处用了「忽略行尾注释以外」的保守写法，
+  但对 `/* */` 块注释不敏感。改动代码时若发现误报，先看是不是写进了注释。
+- `StatusTag` 的参数提取是括号配平扫描，不解析字符串里的括号（当前没有这种参数）。
+
+跑法：`python tools/verify_ui_controls.py`；有 FAIL 时退出码 1。
+
+**被测源码根目录可以用第一个参数覆盖**（默认是仓库里的 `app/src/main/java/.../ui`）。
+变异探针 `tools/probe_ui_controls.sh` 靠这一点在**副本**上验证本脚本真的有判别力 ——
+只改副本，真实源码不碰。
+"""
+
+import io
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_UI = os.path.join(ROOT, "app", "src", "main", "java", "cn", "edu", "jxau", "tools", "ui")
+UI = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_UI
+
+# 明确的「角色 → 内容色」配对表。写在这里而不是推导，是为了让「新增一个角色忘了配对」
+# 变成一条 FAIL，而不是被推导规则悄悄放过。
+ROLE_PAIRS = {
+    "primary": "onPrimary",
+    "secondary": "onSecondary",
+    "tertiary": "onTertiary",
+    "error": "onError",
+    "primaryContainer": "onPrimaryContainer",
+    "secondaryContainer": "onSecondaryContainer",
+    "tertiaryContainer": "onTertiaryContainer",
+    "errorContainer": "onErrorContainer",
+    "surfaceVariant": "onSurfaceVariant",
+    "surface": "onSurface",
+    "inverseSurface": "inverseOnSurface",
+}
+
+results = []
+
+
+def check(name, actual, expected):
+    ok = actual == expected
+    results.append((ok, name, actual, expected))
+    return ok
+
+
+def last_seg(expr):
+    """`MaterialTheme.colorScheme.onErrorContainer` → `onErrorContainer`。
+
+    `color.copy(alpha = 0.14f)` → `color`：先剥掉 `.copy(...)` 调用再取最后一段。
+    不能直接 `split(".")[-1]` —— 那个表达式里有 `0.14f`，会被切成 `14f`。
+    """
+    e = expr.strip()
+    m = re.match(r"^(.*?)\.copy\s*\(", e)
+    if m:
+        e = m.group(1)
+    return e.split(".")[-1]
+
+
+def pair_ok(container, content):
+    """容器色与内容色是不是同一套配对。
+
+    **这个函数是本脚本存在的核心理由**，所以它自己也要被证明有判别力（见 §0）。
+    它必须拒绝 `secondary` + `onSecondaryContainer` 这种「都是 Container 家族但配错了套」，
+    而不只是「看起来像」。
+    """
+    c, t = last_seg(container), last_seg(content)
+    if c == t:
+        return True  # 同名（grade 的 `color` / `color`：半透明底 + 同色字）
+    return ROLE_PAIRS.get(c) == t
+
+
+# ---------------------------------------------------------------- §0 自证
+# 表驱动：给 pair_ok 喂已知好/坏样本，断言它的判定与预期一致。
+# 这一节不过，后面所有 PASS 都不算数。
+SELF_CASES = [
+    ("secondary", "onSecondaryContainer", False),  # 真实踩过的那个 bug
+    ("secondaryContainer", "onSecondaryContainer", True),
+    ("secondaryContainer", "onSecondary", False),
+    ("errorContainer", "onError", False),
+    ("error", "onError", True),
+    ("surfaceVariant", "onSurfaceVariant", True),
+    ("surfaceVariant", "onSurface", False),
+    ("color", "color", True),
+    ("primaryContainer", "onPrimaryContainer", True),
+    ("primaryContainer", "onSecondaryContainer", False),
+    # 下面两条同时覆盖「取最后一段」这一步：带包名前缀、带 `.copy(...)` 调用
+    ("MaterialTheme.colorScheme.secondaryContainer",
+     "MaterialTheme.colorScheme.onSecondaryContainer", True),
+    ("color.copy(alpha = 0.14f)", "color", True),
+]
+
+
+def self_check_pairs():
+    bad = []
+    for c, t, expect in SELF_CASES:
+        if pair_ok(c, t) != expect:
+            bad.append(f"{c} + {t}：期望 {'配得上' if expect else '配不上'}，"
+                       f"实际 {'配得上' if pair_ok(c, t) else '配不上'}")
+    check("§0 配对判据自证（%d 个样本）" % len(SELF_CASES), bad, [])
+
+
+# ---------------------------------------------------------------- 读源码
+def kt_files():
+    for dp, _, fns in os.walk(UI):
+        for fn in sorted(fns):
+            if fn.endswith(".kt"):
+                yield os.path.join(dp, fn)
+
+
+def rel(path):
+    return os.path.relpath(path, ROOT).replace("\\", "/")
+
+
+SOURCES = {p: io.open(p, encoding="utf-8").read() for p in kt_files()}
+
+
+def find_calls(src, name):
+    """找 `name(...)` 调用，返回 [(行号, 括号内原文)]。
+
+    两处刻意做对的地方（都是第一版踩过的坑）：
+    - **不匹配函数声明**：`internal fun StatusTag(` 只是定义，不是调用。靠前面是不是 `fun ` 排除。
+    - **不匹配更长标识符的后缀**：`PrimaryTabRow(` 里含有 `TabRow(`，
+      所以要求名字前面不是 `[A-Za-z0-9_.]` —— 否则「`TabRow` 残留 3 处」是假警报。
+    """
+    out = []
+    pattern = re.compile(r"(?<![A-Za-z0-9_.])" + re.escape(name) + r"\(")
+    for m in pattern.finditer(src):
+        if src[max(0, m.start() - 4): m.start()] == "fun ":
+            continue
+        depth, j = 1, m.end()
+        while j < len(src) and depth:
+            if src[j] == "(":
+                depth += 1
+            elif src[j] == ")":
+                depth -= 1
+            j += 1
+        out.append((src[: m.start()].count("\n") + 1, src[m.end(): j - 1]))
+    return out
+
+
+def arg_of(args, key):
+    """取 `key = 值` 里的值，**值里允许带括号**（`color.copy(alpha = 0.14f)`）。
+
+    用 `[^,)]+` 会把它截成 `color.copy(alpha = 0.14f`，再取最后一段就成了 `14f` ——
+    第一版就是这么把 grade 那处误判成「配对无法证明」的。
+    """
+    m = re.search(r"(?<![A-Za-z0-9_])" + re.escape(key) + r"\s*=\s*", args)
+    if not m:
+        return None
+    i, depth, j = m.end(), 0, m.end()
+    while j < len(args):
+        ch = args[j]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif ch == "," and depth == 0:
+            break
+        j += 1
+    return args[i:j].strip()
+
+
+# ---------------------------------------------------------------- §1 StatusTag 配对
+def check_status_tags():
+    total = 0
+    problems = []
+    for path, src in SOURCES.items():
+        for line, args in find_calls(src, "StatusTag"):
+            container = arg_of(args, "container")
+            content = arg_of(args, "content")
+            if container is None or content is None:
+                # text = ... 这种单行简写不存在（必须给容器色），所以这里算错
+                problems.append(f"{rel(path)}:{line} 缺少 container/content 具名参数")
+                continue
+            total += 1
+            c, t = last_seg(container), last_seg(content)
+            if c == t:
+                continue
+            if c in ROLE_PAIRS:
+                if not pair_ok(container, content):
+                    problems.append(
+                        f"{rel(path)}:{line} 配对错：container={c} 应配 {ROLE_PAIRS[c]}，"
+                        f"实际 content={t}"
+                    )
+                continue
+            # 局部变量（exam / rush 的 bg / fg）：要求同一个文件里有 `val (bg, fg) = ...`
+            # 解构，这样它们的配对就落进 §2 的 `to` 检查里。
+            if not re.search(r"val\s*\(\s*%s\s*,\s*%s\s*\)\s*=" % (re.escape(c), re.escape(t)), src):
+                problems.append(
+                    f"{rel(path)}:{line} container={c} / content={t} 无法证明是一套配对："
+                    f"既不是 colorScheme 角色，也不是 `val ({c}, {t}) =` 解构出来的"
+                )
+    check("§1 StatusTag 调用处数（应覆盖全部 6 处标签）", total, 6)
+    check("§1 StatusTag 容器色/内容色全部成套", problems, [])
+
+
+# ---------------------------------------------------------------- §2 容器色 to 内容色
+def check_to_pairs():
+    pair_re = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s+to\s+([A-Za-z_][A-Za-z0-9_.]*)")
+    found, problems = 0, []
+    for path, src in SOURCES.items():
+        for i, line in enumerate(src.splitlines(), 1):
+            # 注释行不查（说明文字里举例会误报）
+            code = line.split("//")[0]
+            for m in pair_re.finditer(code):
+                a, b = last_seg(m.group(1)), last_seg(m.group(2))
+                if not b.startswith("on"):
+                    continue
+                found += 1
+                if not pair_ok(a, b):
+                    problems.append(
+                        f"{rel(path)}:{i} `{a} to {b}` 配对错：{a} 应配 {ROLE_PAIRS.get(a, '?')}"
+                    )
+    # 期望值 6 = exam 2 条 + rush 4 条。低于这个数说明扫描失效（而不是代码变好），
+    # 所以这里用 >= 而不是 ==：以后新增配对不该让脚本红。
+    check("§2 扫描到 `容器色 to 内容色` 配对数（≥6，防扫描失效）", found >= 6, True)
+    check("§2 所有 `to` 配对都成套", problems, [])
+
+
+# ---------------------------------------------------------------- §3 控件归位现状
+def count_calls(name):
+    return sum(len(find_calls(src, name)) for src in SOURCES.values())
+
+
+def check_controls():
+    # 这三样是 P1 明确要清掉的写法。为 0 才是目标态。
+    check("§3 `TabRow(` 残留（目标 0）", count_calls("TabRow"), 0)
+    check("§3 `RadioButton(` 残留（目标 0）", count_calls("RadioButton"), 0)
+    check("§3 `Checkbox(` 残留（目标 0）", count_calls("Checkbox"), 0)
+
+    # 这三样是替代品，数量不足说明改动被回退了。
+    check("§3 `PrimaryTabRow(` 处数（选课页内层切换）", count_calls("PrimaryTabRow"), 1)
+    check("§3 `Switch(` 处数（记住密码 + 隐私显示完整）", count_calls("Switch"), 2)
+    check("§3 `SegmentedButton(` 处数（通道 + 配色模式 + 字号 + 字族）",
+          count_calls("SegmentedButton"), 4)
+
+    # 底部导航四个图标必须成对（outlined 未选中 / filled 选中）。
+    app_root = SOURCES.get(os.path.join(UI, "AppRoot.kt"))
+    if app_root is None:
+        check("§3 AppRoot.kt 存在", False, True)
+        return
+    missing = []
+    for icon in ("DateRange", "AddCircle", "Star", "Person"):
+        if f"Icons.Outlined.{icon}" not in app_root:
+            missing.append(f"缺 Icons.Outlined.{icon}")
+        if f"Icons.Filled.{icon}" not in app_root:
+            missing.append(f"缺 Icons.Filled.{icon}")
+    check("§3 底部导航 4 项图标 outlined/filled 成对", missing, [])
+    check("§3 导航栏按选中态切图标（而不是只换颜色）",
+          ("tab.selectedIcon" in app_root and "selected == index" in app_root), True)
+
+
+# ---------------------------------------------------------------- §4 写死的圆角
+def check_shapes():
+    """6 处标签的 4dp 圆角必须来自 shapes 主题，不许再写死。
+
+    ⚠️ 这个检查只覆盖「曾经是标签」的那 6 个文件里的 4dp 写法。
+    `plan` / `profile` 里还有几个 7/10/14dp 的一次性形状，那是刻意的，不在本检查范围。
+    """
+    problems = []
+    for name in ("exam/ExamScreen.kt", "rush/RushScreen.kt", "selection/SelectionScreen.kt",
+                 "student/StudentScreen.kt", "grade/GradeScreen.kt", "advisor/AdvisorScreen.kt"):
+        path = os.path.join(UI, *name.split("/"))
+        src = SOURCES.get(path)
+        if src is None:
+            problems.append(f"文件不存在：{name}")
+            continue
+        if "RoundedCornerShape(4.dp)" in src:
+            problems.append(f"{name} 又出现了写死的 RoundedCornerShape(4.dp)")
+    check("§4 6 处标签不再写死 4dp 圆角", problems, [])
+    check("§4 StatusTag 用 shapes.extraSmall",
+          "MaterialTheme.shapes.extraSmall" in
+          SOURCES.get(os.path.join(UI, "profile", "DetailParts.kt"), ""), True)
+
+
+def main():
+    self_check_pairs()
+    check_status_tags()
+    check_to_pairs()
+    check_controls()
+    check_shapes()
+
+    width = max(len(n) for _, n, _, _ in results)
+    fails = 0
+    for ok, name, actual, expected in results:
+        if ok:
+            print(f"  PASS {name:<{width}}")
+        else:
+            fails += 1
+            print(f"  FAIL {name:<{width}}  期望 {expected!r}，实际 {actual!r}")
+    print(f"\n合计 {len(results)} 项，{len(results) - fails} PASS，{fails} FAIL")
+    sys.exit(1 if fails else 0)
+
+
+if __name__ == "__main__":
+    main()

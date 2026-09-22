@@ -49,6 +49,10 @@
   **direct boot 竞态**（`LOCKED_BOOT_COMPLETED` 读不到 `shared_prefs` → 不声明它）。
 - **T2 大纲**：`docs/T2功能实施大纲.md`。P0 = 成绩单 PDF（带章）下载 / 学分进度 /
   主干课程绩点 / 成绩趋势；P1 = 找空教室 / 培养方案 / 考试倒计时。
+- **UI 改造（`docs/UI改造实施大纲.md`）**：P0 已交付（`ca8e69c`：课表 2dp 档位 · 主题色 12 预设 +
+  自定义色相 · 字号缩放 + 系统字族）；**P1 控件归位已交付**（`StatusTag` 抽 6 处标签 · `PrimaryTabRow` ·
+  2 处 `SegmentedButton` · 2 处 `Switch` · 导航图标 outlined↔filled）。P2 待做：设置页
+  `SectionCard` → 分组 + `ListItem`；`TopAppBar`（按大纲 §1.1 方案 (a)：课表页不加）。
 - 新排功能判据（**换掉「按接口好挖排」**）：一学期真会用几次 · 有无等效替代 · 出错可否挽回。
 - 明确不做：评教 · 免修补修 · 等级考试**报名与支付**（链路含 `alipayto`）· 消息中心（服务端 500）·
   教材核对（Ext.NET）· 桌面小组件 · **自行推算 GPA** · 按教师查课表。
@@ -84,6 +88,19 @@
   `<queries>` 时查询恒为空，会**反过来谎报**「没有 App 能处理」。
 - **不要自己测自己**：纯逻辑用 Python 独立重算再对账；对账模型要**建模 Compose 8 位量化**；别用肉眼
   估截图 → 写脚本量像素；**「只是难看」也要有断言 + 变异探针**。
+- **容器色与内容色必须成对**（`secondaryContainer` 配 `onSecondaryContainer`，不能配 `onSecondary`）。
+  配错 = 深底深字/浅底浅字，**两个颜色各自合法 → 编译器与自检都不报**，只能静态查：
+  `tools/verify_ui_controls.py`（15 项）+ `probe_ui_controls.sh`（10 条变异）。
+  这类「能编译、界面不崩、行为悄悄退化」正是最该被断言盯住的一类。
+- **M3 四种 chip 全都强制 `onClick`** —— 纯陈述型标签（「已选」「补考」「运行中」）套 `AssistChip`
+  会带上假涟漪 + 错误的无障碍语义。静态 tonal 容器的正解是
+  `Surface(shape = MaterialTheme.shapes.extraSmall, color, contentColor)`（项目里是 `StatusTag`）。
+- **`MaterialTheme.shapes` 没被覆盖时就是 M3 baseline**：extraSmall 4 / small 8 / medium 12 /
+  large 16 / extraLarge 28 → 把写死的 `RoundedCornerShape(4|8|12.dp)` 换成 `shapes.*` 是**零视觉变化**的清理。
+- **文本工具脚本的三个坑**（`verify_ui_controls.py` 第一版都误报过）：取表达式的最后一段前要先剥
+  `.copy(...)`（否则 `color.copy(alpha = 0.14f)` 切成 `14f`）；数 `TabRow(` 会被 `PrimaryTabRow(` 命中
+  → 名字前加 `(?<![A-Za-z0-9_.])`；找调用要跳过 `fun X(` 声明。
 - **每次 Bash 调用 adb daemon 都会重启** → `connect` 与命令必须同一次调用，带 `-s 127.0.0.1:7555`；
-  **模拟器访问宿主机用 `10.0.2.2`**；**Git Bash 没有 `unzip`**（静默失败 → 假通过）。
+  **模拟器访问宿主机用 `10.0.2.2`**；**Git Bash 没有 `unzip`**（静默失败 → 假通过）；
+  **Git Bash 给 Windows 原生 exe 传路径必须用 `pwd -W`**（`/d/...` 会被解释成 `D:\d\...`）。
 - **隐私**：学籍接口含身份证/住址/邮编 → 展示脱敏、不落日志、不导出；`tools/out/` 保持 gitignore。

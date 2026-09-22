@@ -1,12 +1,10 @@
 package cn.edu.jxau.tools.ui.advisor
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +23,7 @@ import cn.edu.jxau.tools.ui.profile.InfoRow
 import cn.edu.jxau.tools.ui.profile.LoadingBox
 import cn.edu.jxau.tools.ui.profile.RetryBox
 import cn.edu.jxau.tools.ui.profile.SectionCard
+import cn.edu.jxau.tools.ui.profile.StatusTag
 import cn.edu.jxau.tools.ui.profile.fullDate
 
 /**
@@ -112,12 +111,9 @@ private fun AdvisorCard(record: AdvisorRecord) {
 /** 关联状态（实测「当前导师」）。历史学期的那条也会带状态，所以不叫「当前」 */
 @Composable
 private fun StateChip(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSecondaryContainer,
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+    StatusTag(
+        text = text,
+        container = MaterialTheme.colorScheme.secondaryContainer,
+        content = MaterialTheme.colorScheme.onSecondaryContainer,
     )
 }

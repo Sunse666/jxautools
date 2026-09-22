@@ -1,6 +1,5 @@
 package cn.edu.jxau.tools.ui.grade
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -47,6 +45,7 @@ import cn.edu.jxau.tools.data.model.GradeItem
 import cn.edu.jxau.tools.data.model.GradeSummary
 import cn.edu.jxau.tools.data.model.PassState
 import cn.edu.jxau.tools.data.model.TermGrades
+import cn.edu.jxau.tools.ui.profile.StatusTag
 
 @Composable
 fun GradeScreen(viewModel: GradeViewModel = viewModel()) {
@@ -376,19 +375,19 @@ private fun StateBadge(grade: GradeItem) {
         }
     }
     Spacer(Modifier.width(6.dp))
-    Box(
-        modifier = Modifier
-            .background(color.copy(alpha = 0.14f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 4.dp, vertical = 1.dp),
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
+    // 半透明底 + 9sp 粗体是本页特有的紧凑样式（成绩列表一行里要塞下课程名 + 学分 + 绩点 + 标签），
+    // 不与其它 5 处对齐；但形状仍走 shapes 主题、内容色仍走同一套配对。
+    StatusTag(
+        text = text,
+        container = color.copy(alpha = 0.14f),
+        content = color,
+        style = MaterialTheme.typography.labelSmall.copy(
             fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
-            color = color,
-        )
-    }
+        ),
+        horizontalPadding = 4.dp,
+        verticalPadding = 1.dp,
+    )
 }
 
 // ---------- 详情 ----------

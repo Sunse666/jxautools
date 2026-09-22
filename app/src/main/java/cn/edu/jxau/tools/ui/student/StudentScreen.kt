@@ -1,6 +1,5 @@
 package cn.edu.jxau.tools.ui.student
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,12 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -24,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,6 +36,7 @@ import cn.edu.jxau.tools.ui.profile.InfoRow
 import cn.edu.jxau.tools.ui.profile.LoadingBox
 import cn.edu.jxau.tools.ui.profile.RetryBox
 import cn.edu.jxau.tools.ui.profile.SectionCard
+import cn.edu.jxau.tools.ui.profile.StatusTag
 
 /**
  * 学籍信息（「我的 → 我的信息 → 学籍信息」）。
@@ -108,7 +109,13 @@ private fun PrivacyBar(reveal: Boolean, onToggle: () -> Unit) {
         ),
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            modifier = Modifier
+                .toggleable(
+                    value = reveal,
+                    role = Role.Switch,
+                    onValueChange = { onToggle() },
+                )
+                .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -121,12 +128,9 @@ private fun PrivacyBar(reveal: Boolean, onToggle: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onToggle) {
-                Text(
-                    if (reveal) "隐藏" else "显示完整",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            // onCheckedChange = null：点击由整行接管（否则 Switch 和 Row 会各接一次点击）
+            Switch(checked = reveal, onCheckedChange = null)
         }
     }
 }
@@ -232,17 +236,13 @@ private fun ChangeCard(change: XueJiChange) {
 private fun ChangeFields(title: String, fields: List<ProfileField>) {
     Spacer(Modifier.height(6.dp))
     Row {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .width(48.dp)
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant,
-                    RoundedCornerShape(4.dp),
-                )
-                .padding(horizontal = 4.dp, vertical = 1.dp),
+        StatusTag(
+            text = title,
+            container = MaterialTheme.colorScheme.surfaceVariant,
+            content = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(48.dp),
+            horizontalPadding = 4.dp,
+            verticalPadding = 1.dp,
         )
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {

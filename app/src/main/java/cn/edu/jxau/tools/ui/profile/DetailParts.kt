@@ -12,12 +12,16 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
 
@@ -37,7 +41,9 @@ internal fun fullDate(date: LocalDate): String =
  * 各写了一份。子页越加越多，同一个视觉规则就有三个地方可以改错 —— 收敛到这里，
  * 样式统一由这个文件说了算。
  *
- * 都是 `internal`：只在 `ui.profile` 及其子页（考试、学籍、导师、学期规划）里用。
+ * 都是 `internal`，用它的有：`ui.profile` 及其子页（外观主题、字体、周次校准、考试、学籍、
+ * 导师、学期规划），以及 `ui.grade` / `ui.selection` / `ui.rush` 这几个页（它们只是主 Tab
+ * 不同，展示零件没必要各写一份）。
  */
 
 /** 带标题的卡片。内容是调用方的 Column 作用域，间距与内边距由这里统一 */
@@ -69,6 +75,49 @@ internal fun InfoRow(label: String, value: String) {
             value,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * 状态标签（「已选」「补考」「运行中」「已满」这类**不可点击**的小标记）。
+ *
+ * ## 为什么不是 `AssistChip` / `SuggestionChip`
+ * M3 的四种 chip **全都要求 `onClick`** —— 它们的语义是「可以操作的东西」。这些标签是纯陈述
+ * （这个课已经选了 / 这是补考），硬套 chip 会带进两样错的东西：按下去有涟漪，
+ * 无障碍树里被读成按钮。所以按 M3 对「静态 tonal 容器」的做法用 [Surface] 画。
+ *
+ * ## 与之前 6 份手绘实现的关系
+ * 之前每处都是 `Modifier.background(c, RoundedCornerShape(4.dp)).padding(...)` 的复制粘贴，
+ * 两个后果：样式要改就改 6 个地方；以及那个 4.dp 是**写死的**，
+ * 换 `shapes` 主题时这 6 个标签不会跟着变。现在圆角取自 [MaterialTheme.shapes].extraSmall
+ * （M3 baseline 正好是 4dp，视觉零变化），文字色靠 `contentColor` 传播，
+ * 不再每处手写一遍 `color = ...`。
+ *
+ * ⚠️ [container] 与 [content] 必须是**同一套配对**（`secondaryContainer` 配
+ * `onSecondaryContainer`，不能配 `onSecondary`）。混搭出来的是深底深字或浅底浅字，
+ * 而这类错误在编译器与自检里都不报 —— 见 `SelectionScreen` 里「已选」那一处的注释。
+ */
+@Composable
+internal fun StatusTag(
+    text: String,
+    container: Color,
+    content: Color,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.labelSmall,
+    horizontalPadding: Dp = 6.dp,
+    verticalPadding: Dp = 2.dp,
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.extraSmall,
+        color = container,
+        contentColor = content,
+    ) {
+        Text(
+            text = text,
+            style = style,
+            modifier = Modifier.padding(horizontal = horizontalPadding, vertical = verticalPadding),
         )
     }
 }

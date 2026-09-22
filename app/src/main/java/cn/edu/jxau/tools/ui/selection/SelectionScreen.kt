@@ -17,19 +17,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,6 +51,7 @@ import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.RushState
 import cn.edu.jxau.tools.data.model.SelectionScope
 import cn.edu.jxau.tools.data.model.SelectionStats
+import cn.edu.jxau.tools.ui.profile.StatusTag
 import cn.edu.jxau.tools.ui.rush.RushScreen
 
 /**
@@ -105,14 +106,17 @@ private enum class SelectionTab(val label: String) {
  *
  * 排队数直接写在标签上（`抢课任务（3）`）：用户加完任务最想知道的就是「有几个在等着」，
  * 把它放在他一定会看到的地方，比弹一次提示更持久。
+ *
+ * 用 `PrimaryTabRow`（M3 的 Pixel 形态：选中项是一枚 pill）而不是 `TabRow`（老式下划线）。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SelectionTabRow(
     current: SelectionTab,
     pendingCount: Int,
     onPick: (SelectionTab) -> Unit,
 ) {
-    TabRow(selectedTabIndex = current.ordinal) {
+    PrimaryTabRow(selectedTabIndex = current.ordinal) {
         SelectionTab.entries.forEach { tab ->
             Tab(
                 selected = tab == current,
@@ -307,7 +311,7 @@ private fun WindowBanner(signal: WindowSignal, note: String, ticketValid: Boolea
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .background(bg, RoundedCornerShape(8.dp))
+            .background(bg, MaterialTheme.shapes.small)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Text(
@@ -348,7 +352,7 @@ private fun NoticeBar(notice: WriteNotice, onDismiss: () -> Unit, onGoRush: (() 
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .background(bg, RoundedCornerShape(8.dp))
+            .background(bg, MaterialTheme.shapes.small)
             .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -536,18 +540,22 @@ private fun CapacityText(course: CourseClass) {
     Text(course.capacityText, style = MaterialTheme.typography.labelSmall, color = color)
 }
 
-/** 已选标记。未选的行**不画标记**——一屏上百条都挂个「未选」标签只会变成噪声 */
+/**
+ * 已选标记。未选的行**不画标记**——一屏上百条都挂个「未选」标签只会变成噪声。
+ *
+ * ⚠️ 底色与文字色**必须成对**。这里曾经是 `container = secondary` + `content =
+ * onSecondaryContainer` —— 两个都是深色（浅色主题下相对亮度 0.100 / 0.030），
+ * 对比度约 1.9，等于深底写深字，实际读不出来。编译器和自检都不报这种错，
+ * 只能靠「配对」这条纪律守着（[StatusTag] 的 KDoc 里也写了）。
+ */
 @Composable
 private fun StateChip(course: CourseClass) {
     if (!course.selected) return
-    Text(
-        "已选",
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSecondaryContainer,
-        modifier = Modifier
-            .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+    StatusTag(
+        text = "已选",
+        container = MaterialTheme.colorScheme.secondaryContainer,
+        content = MaterialTheme.colorScheme.onSecondaryContainer,
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
     )
 }
 

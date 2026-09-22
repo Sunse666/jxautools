@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -48,7 +47,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -394,29 +392,29 @@ private fun AppearancePage(viewModel: ProfileViewModel, onBack: () -> Unit) {
 
     DetailScaffold("外观主题", onBack) {
         SectionCard("配色模式") {
-            ThemeMode.entries.forEach { mode ->
-                val selected = mode == prefs.themeMode
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .selectable(selected = selected) { viewModel.setThemeMode(mode) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(
-                        selected = selected,
-                        onClick = { viewModel.setThemeMode(mode) },
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(mode.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        Text(
-                            mode.detail,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+            // 三选一 = 切换一个模式 → M3 的分段按钮，而不是竖排 RadioButton。
+            // RadioButton 适合「表单里的一组单选项，每项需要一段说明」；这里三个标签都只有
+            // 两个字，竖排占 3 行还要读 3 段说明才能选。分段按钮横排一行搞定，
+            // 说明文字只留当前项的（下面一行）—— 与「字号缩放」「字族」两处保持一致。
+            val mode = prefs.themeMode
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                ThemeMode.entries.forEachIndexed { index, candidate ->
+                    SegmentedButton(
+                        selected = candidate == mode,
+                        onClick = { viewModel.setThemeMode(candidate) },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = ThemeMode.entries.size,
+                        ),
+                    ) { Text(candidate.label) }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                mode.detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         SectionCard("主题色") {

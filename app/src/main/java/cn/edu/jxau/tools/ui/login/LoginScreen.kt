@@ -15,24 +15,27 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -163,7 +167,13 @@ private fun Header(state: LoginUiState, keepalive: Boolean, lastCheck: String) {
     }
 }
 
-/** 通道选择：横向三选一，比竖排省约 70dp 高度 */
+/**
+ * 通道选择：**互斥多选一**，所以用 `SingleChoiceSegmentedButtonRow` 而不是一排 RadioButton。
+ *
+ * M3 的语义分工很清楚：RadioButton 属于「表单里的单选项」（通常竖排、带说明文字），
+ * 分段按钮属于「切换一个视图/模式」。这里是后者 —— 三个短标签、横向平铺、选完立即生效，
+ * 还顺手省下约 70dp 高度。横排 RadioButton 的老写法在 Pixel 上已经不是标准形态了。
+ */
 @Composable
 private fun ChannelCard(
     selected: Channel,
@@ -172,33 +182,27 @@ private fun ChannelCard(
     onSelect: (Channel) -> Unit,
 ) {
     SectionCard(title = "访问通道") {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            // MOCK 是「我的」页演练开关的专用通道，不作为登录选项出现
-            Channel.entries.filter { it != Channel.MOCK }.forEach { channel ->
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .selectable(selected = channel == selected, enabled = enabled) { onSelect(channel) },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(
-                        selected = channel == selected,
-                        onClick = { onSelect(channel) },
-                        enabled = enabled,
-                        modifier = Modifier.size(36.dp),
-                    )
-                    Text(
-                        text = channel.shortLabel,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+        // MOCK 是「我的」页演练开关的专用通道，不作为登录选项出现
+        val channels = Channel.entries.filter { it != Channel.MOCK }
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            channels.forEachIndexed { index, channel ->
+                SegmentedButton(
+                    selected = channel == selected,
+                    onClick = { onSelect(channel) },
+                    enabled = enabled,
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = channels.size),
+                    label = {
+                        Text(
+                            text = channel.shortLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
             }
         }
+        Spacer(Modifier.height(8.dp))
         Text(
             text = if (effective != null) {
                 "${selected.label} ｜ 上次实际使用：${effective.shortLabel}"
@@ -284,13 +288,31 @@ private fun CredentialsCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(
+        // 整行可点（`toggleable` 挂在 Row 上，Switch 自己 `onCheckedChange = null`）：
+        // M3 里「一行 = 一个开关」的标准形态就是这样，点标签也能切换。
+        // 旧写法（Checkbox + 右侧文字）只有那个小方框能点，手指大一点就点不中。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = state.rememberPassword,
+                    enabled = !state.busy,
+                    role = Role.Switch,
+                    onValueChange = onRemember,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "记住密码（本地混淆存储，非加密）",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Switch(
                 checked = state.rememberPassword,
-                onCheckedChange = onRemember,
+                onCheckedChange = null,
                 enabled = !state.busy,
             )
-            Text("记住密码（本地混淆存储，非加密）", style = MaterialTheme.typography.bodySmall)
         }
 
         Button(

@@ -3,7 +3,6 @@ package cn.edu.jxau.tools.ui.exam
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,6 +42,7 @@ import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.export.ExamIcs
 import cn.edu.jxau.tools.data.model.ExamItem
 import cn.edu.jxau.tools.ui.profile.DetailScaffold
+import cn.edu.jxau.tools.ui.profile.StatusTag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -407,14 +406,7 @@ private fun KindChip(kind: String) {
     } else {
         MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
     }
-    Text(
-        kind,
-        style = MaterialTheme.typography.labelSmall,
-        color = fg,
-        modifier = Modifier
-            .background(bg, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
+    StatusTag(text = kind, container = bg, content = fg)
 }
 
 /**

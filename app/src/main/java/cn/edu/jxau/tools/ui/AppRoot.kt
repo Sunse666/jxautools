@@ -8,6 +8,10 @@ import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.AddCircle
+import androidx.compose.material.icons.outlined.DateRange
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -64,12 +68,20 @@ fun AppRoot() {
  * 现在「选课」内部再分「课程 / 抢课任务」两半，见 [SelectionScreen]。
  *
  * 剩下的 4 项互不重叠：时间安排 / 操作 / 结果 / 设置。
+ *
+ * 图标**成对**给出（未选中 outlined / 选中 filled）：这是 M3 导航栏的标准做法 ——
+ * 选中态换的是形状（描边 → 实心）而不是只换颜色，色觉障碍用户也能看出选了哪一项。
+ * 只给一个 filled 图标的话，选中与未选中只剩颜色差异。
  */
-private enum class Tab(val label: String, val icon: ImageVector) {
-    Timetable("课表", Icons.Filled.DateRange),
-    Selection("选课", Icons.Filled.AddCircle),
-    Grade("成绩", Icons.Filled.Star),
-    Profile("我的", Icons.Filled.Person),
+private enum class Tab(
+    val label: String,
+    val icon: ImageVector,
+    val selectedIcon: ImageVector,
+) {
+    Timetable("课表", Icons.Outlined.DateRange, Icons.Filled.DateRange),
+    Selection("选课", Icons.Outlined.AddCircle, Icons.Filled.AddCircle),
+    Grade("成绩", Icons.Outlined.Star, Icons.Filled.Star),
+    Profile("我的", Icons.Outlined.Person, Icons.Filled.Person),
 }
 
 @Composable
@@ -84,7 +96,12 @@ private fun MainShell() {
                     NavigationBarItem(
                         selected = selected == index,
                         onClick = { selected = index },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
+                        icon = {
+                            Icon(
+                                imageVector = if (selected == index) tab.selectedIcon else tab.icon,
+                                contentDescription = tab.label,
+                            )
+                        },
                         label = { Text(tab.label) },
                     )
                 }

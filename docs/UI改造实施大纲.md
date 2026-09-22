@@ -17,18 +17,50 @@
 所以真正的问题不是「没用 M3」，而是**在 M3 之上有 10 处偏离了 Pixel 的用法**。
 下面这份清单是逐个 grep 核出来的，不是印象：
 
-| # | 现状 | Pixel/M3 的做法 | 位置 |
-|---|---|---|---|
-| 1 | 全应用 **0 个 `TopAppBar`**；子页用自定义 `DetailScaffold`（`IconButton` + `Text`）当标题栏，主页干脆没有栏 | `Scaffold` + `TopAppBar`（主页 `LargeTopAppBar`，子页 `TopAppBar` + `navigationIcon`） | `ui/AppRoot.kt`、`ui/profile/ProfileScreen.kt` |
-| 2 | 设置页是**卡片墙**：每节一张 `Card` + 内嵌标题 | 「分组容器 + `ListItem` 行」，一屏 8~10 行 | `ui/profile/DetailParts.kt::SectionCard` |
-| 3 | **`ListItem` 0 处**，所有列表行手写 `Row` | 用 `ListItem`（自动处理前导/标题/副标题/尾随） | 全 ui 包 |
-| 4 | 内层切换用 **M2 式 `TabRow`**（下划线指示器） | `PrimaryTabRow` / `SecondaryTabRow`（pill 指示器） | `ui/selection/SelectionScreen.kt:115` |
-| 5 | 课程类别**用 `FilterChip` 承担「视图切换」语义** | 切换用 tab / `SegmentedButton`；`FilterChip` 只做筛选 | `ui/selection/SelectionScreen.kt:266` |
-| 6 | 明暗模式三选一用 **`RadioButton` 竖排** | `SegmentedButton`（横排，一眼看全三选） | `ProfileScreen.kt:371` |
-| 7 | **`Switch` 0 处**、`Checkbox` 2 处 | 布尔设置一律 `Switch`，且行可整行点击 | 全 ui 包 |
-| 8 | 图标全用 `Icons.Filled.*`，未选中态也是 filled | 未选中 outlined / 选中 filled（`Icons.Outlined` ↔ `Icons.Filled`） | `AppRoot.kt:69-72` 等 |
-| 9 | 自绘小标签：`Modifier.background(bg, RoundedCornerShape(4.dp))` 共 4 处 | `AssistChip` / `SuggestionChip` / `Badge` | `exam:415`、`grade:381`、`rush:246`、`advisor:120` |
-| 10 | `schemeFor` **漏了 `errorContainer` / `onErrorContainer`**（baseline 恰好是红的，所以没暴露） | 显式给出，堵住 baseline 后门 | `ui/theme/Theme.kt` |
+| # | 现状 | Pixel/M3 的做法 | 位置 | P1 结果 |
+|---|---|---|---|---|
+| 1 | 全应用 **0 个 `TopAppBar`**；子页用自定义 `DetailScaffold`（`IconButton` + `Text`）当标题栏，主页干脆没有栏 | `Scaffold` + `TopAppBar`（主页 `LargeTopAppBar`，子页 `TopAppBar` + `navigationIcon`） | `ui/AppRoot.kt`、`ui/profile/ProfileScreen.kt` | 留到 P2 |
+| 2 | 设置页是**卡片墙**：每节一张 `Card` + 内嵌标题 | 「分组容器 + `ListItem` 行」，一屏 8~10 行 | `ui/profile/DetailParts.kt::SectionCard` | 留到 P2 |
+| 3 | **`ListItem` 0 处**，所有列表行手写 `Row` | 用 `ListItem`（自动处理前导/标题/副标题/尾随） | 全 ui 包 | 留到 P2 |
+| 4 | 内层切换用 **M2 式 `TabRow`**（下划线指示器） | `PrimaryTabRow` / `SecondaryTabRow`（pill 指示器） | `ui/selection/SelectionScreen.kt:115` | ✅ 已改 |
+| 5 | ~~课程类别**用 `FilterChip` 承担「视图切换」语义**~~ | ~~切换用 tab / `SegmentedButton`~~ | ~~`ui/selection/SelectionScreen.kt:266`~~ | ❌ **这条是误判，不改** |
+| 6 | 明暗模式三选一用 **`RadioButton` 竖排** | `SegmentedButton`（横排，一眼看全三选） | `ProfileScreen.kt:371` | ✅ 已改 |
+| 7 | **`Switch` 0 处**、`Checkbox` 1 处 + `TextButton` 当开关 1 处 | 布尔设置一律 `Switch`，且行可整行点击 | `login/LoginScreen.kt:288`、`student/StudentScreen.kt:124` | ✅ 已改 |
+| 8 | 图标全用 `Icons.Filled.*`，未选中态也是 filled | 未选中 outlined / 选中 filled（`Icons.Outlined` ↔ `Icons.Filled`） | `AppRoot.kt:69-72` 等 | ✅ 已改 |
+| 9 | 自绘小标签：`Modifier.background(bg, RoundedCornerShape(4.dp))` 共 **6** 处 | `Surface(shape = shapes.extraSmall)` —— ⚠️ **不是 chip**，见下方更正 | `exam:415`、`grade:381`、`rush:246`、`advisor:120`、`selection:549`、`student:243` | ✅ 已改 |
+| 10 | `schemeFor` **漏了 `errorContainer` / `onErrorContainer`**（baseline 恰好是红的，所以没暴露） | 显式给出，堵住 baseline 后门 | `ui/theme/Theme.kt` | ✅ P0 已改 |
+
+### 0.1 这份清单后来被核出三处错，已就地更正
+
+清单是 grep 出来的，但 grep 只给「出现了什么」，不给「用在了什么语义上」。P1 动手时逐处读过，纠正如下：
+
+- **第 5 条作废**：那两处 `FilterChip`（`SelectionScreen:266` 选课范围、`GradeScreen:130` 只看不及格）
+  **本来就是筛选**——多选、可以全不选、选完列表变窄，完全是 `FilterChip` 的语义。
+  原清单把「筛选」当成了「视图切换」，是只看了控件名没看 `onClick` 干了什么。
+- **第 7 条的「`Checkbox` 2 处」是错的**：全应用只有 **1 处** `Checkbox`（`LoginScreen:288` 记住密码）。
+  另一处 `StudentScreen:124` 是 `TextButton`（「显示完整 / 隐藏」两个文字按钮），
+  它的问题不是「用错了控件」而是「该用开关却用了文字按钮」——两处都换成 `Switch` 了，
+  但错误性质不同，登记时记岔了。
+- **第 9 条的「4 处」是错的，实际 6 处**：漏了 `selection:549`（「已选」）和 `student:243`（异动记录的类型标签）。
+  漏掉 `selection:549` 的代价不只是少改一处——见下一条。
+
+### 0.2 P1 顺手挖出的一个真缺陷（原清单没列）
+
+`SelectionScreen:549` 的「已选」标签：底色用 `secondary`、文字色用 `onSecondaryContainer`。
+浅色主题下 `secondary` 相对亮度 0.100、`onSecondaryContainer` 0.030 —— **深底写深字，对比度约 1.9**，
+低于 WCAG AA 的 4.5，实际就是读不出来。
+
+这种错编译器不报、自检不报（两个颜色各自都合法），只能靠「容器色与内容色必须成对」的纪律。
+修法是改回 `secondaryContainer` / `onSecondaryContainer`（对比度 ≥10.4，已有自检守着）。
+
+### 0.3 一处刻意**不统一**
+
+`grade/GradeScreen.kt:381` 的标签（「不及格」「补考」「结果未知」）用的是
+`color.copy(alpha = 0.14f)` 半透明底 + 9sp 粗体，与另外 5 处的实心 container 不同。
+**保留这个差异**：这是成绩列表一行里特有的紧凑样式（一行要塞下课程名 + 学分 + 绩点 + 标签），
+改成实心 container 会把行挤爆。它同样走 `StatusTag`，只是显式传入 `style` / 内边距，
+所以「形状来自主题而不是写死 4.dp」这条好处它也拿到了。
+
 
 外加两条**结构性**的：
 
@@ -46,16 +78,25 @@
 
 ### 1.1 分三层，按「影响面从小到大」排
 
-**A1 控件层（不动布局骨架，风险最低）**
+**A1 控件层（不动布局骨架，风险最低）—— ✅ 已落地（2026-09-22）**
 
-| 改什么 | 怎么改 |
-|---|---|
-| `TabRow` → `PrimaryTabRow` | 「课程 / 抢课任务」改用 M3 新版 tab，pill 指示器；带数字角标的那套文案保留 |
-| `RadioButton` 竖排 → `SegmentedButton` | 明暗模式三选一横排；`SegmentedButton` 是 M3 的「互斥多选一」标准解，也是 Pixel 设置里的实际观感 |
-| 补 `Switch` | 把现有的布尔设置（保活、隐私遮蔽之类）统一成 `Switch` + 整行可点 |
-| 自绘标签 → `AssistChip` / `SuggestionChip` | 4 处 `RoundedCornerShape(4.dp)` 小标签 |
-| 图标 filled/outlined 配对 | 底部导航未选中用 `Icons.Outlined`，选中用 `Icons.Filled` |
-| 补 `errorContainer` / `onErrorContainer` | `Theme.kt` 两处 scheme |
+| 改什么 | 怎么改 | 结果 |
+|---|---|---|
+| `TabRow` → `PrimaryTabRow` | 「课程 / 抢课任务」改用 M3 新版 tab，pill 指示器；带数字角标的那套文案保留 | ✅ |
+| `RadioButton` 竖排 → `SegmentedButton` | 明暗模式三选一横排；`SegmentedButton` 是 M3 的「互斥多选一」标准解，也是 Pixel 设置里的实际观感 | ✅ 连登录页的「访问通道」一起改（也是互斥多选一） |
+| 补 `Switch` | 把现有的布尔设置统一成 `Switch` + 整行可点 | ✅ `LoginScreen` 记住密码、`StudentScreen` 隐私显示完整 |
+| 自绘标签 → **`Surface`**（不是 chip） | 6 处 `RoundedCornerShape(4.dp)` 小标签 | ✅ 见下方更正 —— 原方案写「`AssistChip` / `SuggestionChip`」是错的 |
+| 图标 filled/outlined 配对 | 底部导航未选中用 `Icons.Outlined`，选中用 `Icons.Filled` | ✅ `AppRoot` 4 项 |
+| 补 `errorContainer` / `onErrorContainer` | `Theme.kt` 两处 scheme | ✅ P0 已做 |
+
+> ⚠️ **「自绘标签 → chip」这条方案本身是错的，已更正**。M3 的四种 chip（`AssistChip` /
+> `FilterChip` / `InputChip` / `SuggestionChip`）**全都强制要求 `onClick`** —— 它们的语义就是
+> 「可以操作的东西」。那 6 处标签（「已选」「补考」「运行中」「已满」）是纯陈述，不可点击。
+> 硬套 chip 会带上两样错东西：按下去有涟漪、无障碍树里被读成按钮。
+> M3 对「静态 tonal 容器」的正解是 `Surface(shape = MaterialTheme.shapes.extraSmall, color, contentColor)`
+> —— 抽出成 `ui/profile/DetailParts.kt::StatusTag`，圆角交给 `shapes` 主题（不再写死 4.dp），
+> 内容色靠 `contentColor` 传播（不再每处手写 `color = ...`）。
+
 
 **A2 设置页重构：卡片墙 → 分组列表（中等影响）**
 
@@ -223,7 +264,7 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 
 **会被打到的**：
 
-| 资产 | 影响 | P0 实际结论 |
+| 资产 | 影响 | 实际结论（P0 / P1） |
 |---|---|---|
 | `tools/measure_timetable_geometry.py` | 档位表变了 → 期望值要重算 | **不用改**：它从截图反推 dp，不依赖档位表 |
 | `tools/measure_timetable_columns.py` | 同上（列宽档位） | **不用改**：同上 |
@@ -232,6 +273,13 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 | `tools/verify_theme_palette.py` | 6→12 主题 + 自定义 hue 穷举 → 要扩 | ✅ 已扩到 32 项；**自动重算**旧 6 个的回归基线 |
 | `tools/verify_preferences.py` | 新增 4 个键 → 要扩 | ✅ 已扩；另加 §0「脚本常量 vs 源码」对齐节 |
 | 进程内自检 19 组 520 项 | `TimetableSizeSpec`（含穷举）、`ColorThemeSpec`、`JxauPalette` 三组要重算期望值 | ✅ 已重算并实跑：**263 项全绿**（新增 1 组字体链路） |
+| `tools/verify_p1_pages.py`、`verify_boot_restore.py`、`verify_course_palette.py` | P1 改了 6 个 UI 文件的控件与文案 → 理论上可能被字面量绑定 | ✅ **P1 无影响**：逐条 grep 过，没有一个依赖被改的控件/文案；纯逻辑一行未动 |
+| `tools/verify_ui_controls.py`（**P1 新增**） | 无既有资产覆盖「控件归位 + 颜色配对」→ 新增 | ✅ 15 项全 PASS；配套 `probe_ui_controls.py` 10 条变异全 CAUGHT |
+
+> **P1 的验证资产结论**：这轮改动全部落在 `ui/` 包（控件替换 + 一个共用组件抽取），
+> `data/` 与 `ui/theme/` 的纯逻辑一行没碰。所以「263 项自检」「32/32 主题对账」
+> 「`verify_preferences` 对齐节」三个结论**直接沿用**，P1 不需要重算任何期望值。
+> 这也是刻意安排的：把控件替换和逻辑改动分在两批，验证成本才不叠加。
 
 > 四个像素脚本都是「打开截图 → 找连通段/量间距」，期望值来自图上的像素或
 > `TimetableSurface.kt`（底纹三层混色，本轮未动）—— 所以档位加密不影响它们；
@@ -255,7 +303,7 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 2. ✅ 主题色 6 → 12 预设
 3. ✅ 字号缩放 + 字族（字体链路打通）
 4. ✅ 补 `errorContainer` / `onErrorContainer`
-5. ✅ **自定义色相（原 P2 第 12 项，本轮提前做）** —— 拍板「先做 P0」时一并要求
+5. ✅ **自定义色相**（原属 P2 的更后面一项，拍板「先做 P0」时一并要求提前做）
 
 > 自定义色相原本放 P2，理由是它改的是 `ColorThemeSpec` 的**签名**、与 P0 撞在同一批文件里。
 > 实际做下来这个顾虑成立但不致命：`rolesFor(theme, dark, custom)` 加一个带默认值的参数，
@@ -263,16 +311,18 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 > 代价是这回一次动了 3 个文件（`Preferences` / `ColorThemeSpec` / `ProfileScreen`），
 > 好处是色相滑块与 12 个预设共用同一套派生与断言标准。见 §9-1 的验证结果。
 
-**P1 —— 控件归位（改动分散，单点都小）**
-6. `TabRow` → `PrimaryTabRow`
-7. `RadioButton` → `SegmentedButton`
-8. 布尔设置统一 `Switch`
-9. 自绘标签 → Chip
-10. 图标 outlined/filled 配对
+**P1 —— 控件归位（改动分散，单点都小）—— ✅ 已完成（2026-09-22）**
+6. ✅ `TabRow` → `PrimaryTabRow`
+7. ✅ `RadioButton` → `SegmentedButton`（明暗模式 + 登录页访问通道，共 2 处）
+8. ✅ 布尔设置统一 `Switch`（记住密码 + 隐私显示完整，整行 `toggleable`）
+9. ✅ 自绘标签 → `StatusTag`（`Surface`，**不是 chip**；6 处）
+10. ✅ 图标 outlined/filled 配对
+11. ✅ 【清单外，顺手】修 `SelectionScreen`「已选」的容器色/文字色配对错误（见 §0.2）
+12. ✅ 【清单外，顺手】更正原清单第 5 / 7 / 9 条的三处误判（见 §0.1）
 
 **P2 —— 骨架层（影响面最大，单独一批）**
-11. 设置页 `SectionCard` → 分组 + `ListItem`（保留信息型卡片）
-12. `TopAppBar`（按 §1.1 的取舍方案）
+13. 设置页 `SectionCard` → 分组 + `ListItem`（保留信息型卡片）
+14. `TopAppBar`（按 §1.1 的取舍方案）
 
 ---
 
@@ -329,7 +379,31 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
    - 持久化：杀进程重启后设置仍在，`run-as ... cat shared_prefs/jxau_settings.xml` 与界面摘要一致
    - 像素对账：`measure_*.py` 四个脚本重新跑一遍（脚本本身不用改，但**截图要重截**）
    - 自定义色相：滑块拖到几个色相各截一张，确认色相带高亮、预览、主界面三处一致
-3. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
+3. **P1（控件归位）的验证 —— ✅ 离线部分已完成**：
+   - 编译：`:app:compileDebugKotlin --rerun-tasks` **零 `e:` 零 `w:`**
+     （`grep -c 'w:' tools/out/p1-compile.log` = 0，日志留在 `tools/out/`）。
+   - **新增静态对账 + 变异探针**（这是 P1 唯一能自证的部分）：
+     ```bash
+     bash tools/probe_ui_controls.sh      # = verify_ui_controls.py + probe_ui_controls.py，外层再套一次独立进程 md5 复核
+     ```
+     结果：`verify_ui_controls.py` **15 项全 PASS**；`probe_ui_controls.py` **10 条变异 10 条 CAUGHT**，
+     真实源码 md5 未变。它查的是「改完之后应该是什么样」：
+     - §0 配对判据自证（12 个已知好/坏样本，**含当时那个真 bug**）
+     - §1 6 处 `StatusTag` 的容器色/内容色必须成套
+     - §2 全部 `容器色 to 内容色` 配对成套（exam / rush 用这种写法）
+     - §3 归位现状：`TabRow(` / `RadioButton(` / `Checkbox(` 各 0 处；`PrimaryTabRow` 1 / `Switch` 2 /
+       `SegmentedButton` 4 / 底部导航 4 项图标 outlined↔filled 成对
+     - §4 那 6 个文件里不再出现写死的 `RoundedCornerShape(4.dp)`
+   - **不新增任何需要重标的既有验证资产**：逐脚本核对过 `verify_p1_pages.py` / `verify_preferences.py` /
+     `verify_boot_restore.py` / `verify_theme_palette.py` / `verify_course_palette.py` 与
+     4 个 `measure_*.py`，**没有一个依赖被改动的控件或字面量**（`TabRow` / `RadioButton` /
+     `Checkbox` / `RoundedCornerShape` / 「记住密码」/「显示完整」/「已选」等 grep 均无命中）。
+     这轮改的 6 个文件全在 UI 层，纯逻辑一行没动 —— 所以 `tools/kotlin-check/` 的 263 项
+     自检结论直接沿用，不需要重算期望值（仍然跑了，作为回归保险：**263 PASS / 0 FAIL**）。
+   - 真机部分（你跑）：登录页「访问通道」分段按钮三档、明暗模式三段、两个开关整行点击、
+     底部导航切换时图标描边↔实心、选课页「课程/抢课任务」pill 指示器、
+     以及**成绩页「不及格/补考」标签是否仍然清晰**（那处的半透明底是刻意保留的）。
+4. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
 
 ### 新工具：离线纯函数自检（`tools/kotlin-check/`）
 
@@ -346,6 +420,20 @@ bash tools/kotlin-check/probe.sh   # 变异探针：逐个改坏副本，断言�
 
 探针只改 `tools/out/kotlin-check/scratch/` 下的**副本**（见 `probe.py` 顶部的事故记录），
 真实源码不会被碰；`probe.sh` 会在 Python 前后各用 `md5sum` 复核一次。
+
+### 新工具：UI 控件静态对账 + 变异探针（`tools/verify_ui_controls.py` / `probe_ui_controls*`）
+
+```bash
+python tools/verify_ui_controls.py          # 15 项静态断言；有 FAIL 退出码 1
+python tools/probe_ui_controls.py           # 逐条改坏副本，断言上面的脚本必须报 FAIL
+bash   tools/probe_ui_controls.sh           # 上面两个 + 另起进程 md5 复核真实源码
+```
+
+它存在的理由：**P1 改的东西编译器与运行时自检都看不见**。
+颜色配错（深底深字）、控件被写回老写法、圆角脱离主题 —— 这三类都是「能编译、界面不崩、
+但行为悄悄退化」，正是最该被断言盯住的一类。脚本自带 §0 一节给判据本身喂已知好/坏样本，
+`probe_ui_controls.py` 里还有一条**改检查脚本自己**的变异，用来证明 §0 不是摆设。
+源目录可用第一个参数覆盖（探针就是这样在副本上跑的）。
 
 ---
 
