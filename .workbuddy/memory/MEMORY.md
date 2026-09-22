@@ -53,8 +53,16 @@
   自定义色相 · 字号缩放 + 系统字族）；**P1 控件归位已交付**（`8f3100d`：`StatusTag` 抽 6 处标签 ·
   `PrimaryTabRow` · 2 处 `SegmentedButton` · 2 处 `Switch` · 导航图标 outlined↔filled）；
   **P2 设置页行归位已交付**（`9c2de8a`：`NavRow` → M3 `ListItem` · `SettingsGroup` 归位到 `DetailParts.kt`
-  并写下【信息展示 vs 设置项】分工规则）。
-  **P3 待办且需用户拍板**：`TopAppBar`（大纲 §1.1 A3 三选一 —— 课表页要不要让出 64dp）。
+  并写下【信息展示 vs 设置项】分工规则）；
+  **P3 顶栏骨架层已交付**（用户拍板 §1.1 A3 选项 **(a)**：只给「我的/成绩/选课」加可折叠顶栏，
+  **课表页不加**以保住 11 节的高度。新增 `ui/AppBars.kt` 作为全应用唯一顶栏实现，
+  `DetailScaffold` 的手写 `Row` 换成 M3 顶栏。**顶栏不在 `AppRoot` 的 `Scaffold` 里** ——
+  那里一加 `topBar` 槽课表页会跟着长，选项 (a) 就废了；这条由静态断言 §6 + 变异探针守着）。
+- **UI 改造只剩一条开着**：`GradeScreen.GradeRow` 要不要 `ListItem` 化（行高 48 → 56dp，少看两条成绩）。
+- **M3 顶栏的两条硬事实**（升版本要重核，都没有编译期保障）：① 小 `TopAppBar` +
+  `enterAlwaysScrollBehavior` **真的会让出高度**（字节码：`heightOffsetLimit = -expandedHeight`，
+  布局高度 = `maxHeight + offset`）；② `TopAppBarScrollBehavior` 是实验 API，
+  **出现在函数签名里就会让所有调用点都要 `@OptIn`**，别用 `@file:OptIn` 盖住。
 - **UI 清单的写法教训（该清单 5 条里错了 4 条）**：grep 只给「出现了什么」，不给
   「用在什么语义上」，也**不看历史**。每条都要落到「这一处的语义是什么」+「这状态是什么时候的」
   才能进清单。四错：`FilterChip` 那两处本就是筛选；`Checkbox` 实际 1 处（另一处是 `TextButton`）；

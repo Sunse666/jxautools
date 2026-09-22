@@ -89,6 +89,12 @@ private fun MainShell() {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val tabs = remember { Tab.entries.toList() }
 
+    // ⚠️ 顶栏**不在这里**，而是各页自己画（`ui/AppBars.kt` 的 JxauTopBar）。三个理由：
+    // 1. 「我的」页的子页与首页各有各的标题与返回按钮，放在这里就得把子页状态提到这一层；
+    // 2. 状态栏高度只由这里的 Scaffold 发一次（`contentPadding`），顶栏自己不再吃内边距；
+    // 3. **课表页刻意不加顶栏**（用户拍板，见 `docs/UI改造实施大纲.md` §1.1 A3 选项 (a)）：
+    //    课表要竖着滚 11 节，屏幕高度是它的命根子。所以这里不能有一个统一的 topBar 槽 ——
+    //    加了就会连课表页一起加上。这条约束没有类型能表达，靠 `verify_ui_controls.py` §6 守着。
     Scaffold(
         bottomBar = {
             NavigationBar {

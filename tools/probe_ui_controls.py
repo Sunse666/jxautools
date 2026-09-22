@@ -108,6 +108,77 @@ MUTATIONS = [
      "            .clickable { onOpen(page) }\n"
      "            .padding(horizontal = 14.dp, vertical = 12.dp),",
      "有人把入口行的手算内边距写回来（说明 ListItem 被绕过了）"),
+
+    # ---- P3：顶栏骨架层 ----
+    # ⚠️ 下面这些变异**不一定还能编译**（比如 AppRoot 里凭空用了没 import 的 TopAppBar）——
+    # 探针查的是 `verify_ui_controls.py` 的文本判据，不跑编译器。这是刻意的：
+    # 「能编译但设计被推翻」正是这一节要拦的东西，所以变异体不必是合法 Kotlin。
+    ("AppRoot.kt",
+     "    Scaffold(\n        bottomBar = {",
+     "    Scaffold(\n        topBar = { TopAppBar(title = { Text(\"标题\") }) },\n        bottomBar = {",
+     "有人在 AppRoot 里加了统一的 topBar —— 四个 Tab 会一起长顶栏（选项 a 被推翻）"),
+
+    ("timetable/TimetableScreen.kt",
+     "    Column(modifier = Modifier.fillMaxSize()) {\n        Header(state = state,",
+     "    Column(modifier = Modifier.fillMaxSize()) {\n        JxauTopBar(\"课表\")\n"
+     "        Header(state = state,",
+     "课表页被加上顶栏 —— 它要竖着滚 11 节，白白让出 64dp"),
+
+    ("grade/GradeScreen.kt",
+     "            .jxauTopBarScroll(barBehavior),\n",
+     "",
+     "成绩页漏掉折叠接线 —— 顶栏永远不收，界面上看不出来"),
+
+    ("AppBars.kt",
+     "    nestedScroll(behavior.nestedScrollConnection)",
+     "    this",
+     "把折叠 helper 里的 nestedScroll 掏空（所有页面的顶栏一起变成永不折叠）"),
+
+    ("AppBars.kt",
+     "        windowInsets = WindowInsets(0, 0, 0, 0),\n",
+     "",
+     "顶栏不再把 windowInsets 置 0 —— 它会再吃一次状态栏内边距，内容整体下移"),
+
+    ("AppBars.kt",
+     "            containerColor = MaterialTheme.colorScheme.background,",
+     "            containerColor = MaterialTheme.colorScheme.surface,",
+     "顶栏容器色换成默认的 surface —— 状态栏那一条会露出一道色带"),
+
+    ("AppBars.kt",
+     "                maxLines = 1,\n                overflow = TextOverflow.Ellipsis,\n",
+     "",
+     "顶栏标题不再单行省略（长标题会撑破顶栏）"),
+
+    ("profile/ProfileScreen.kt",
+     "        JxauTopBar(\n            title = title,\n            navigationIcon = {\n"
+     "                IconButton(onClick = onBack) {\n"
+     "                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = \"返回\")\n"
+     "                }\n            },\n        )",
+     "        Row {\n            IconButton(onClick = onBack) {\n"
+     "                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = \"返回\")\n"
+     "            }\n            Text(title)\n        }",
+     "子页外壳退回手写 Row（顶栏样式不再统一）"),
+
+    ("profile/ProfileScreen.kt",
+     "            title = title,\n            navigationIcon = {",
+     "            title = title,\n            scrollBehavior = rememberJxauTopBarScrollBehavior(),\n"
+     "            navigationIcon = {",
+     "子页顶栏跟着折叠 —— 返回按钮会滑出屏幕，用户得先往回滚才能退出"),
+
+    ("grade/GradeScreen.kt",
+     'JxauTopBar(title = "成绩", scrollBehavior = barBehavior)',
+     'JxauTopBar(title = "选课", scrollBehavior = barBehavior)',
+     "成绩页顶栏标题串成了「选课」（复制粘贴最典型的静默缺陷）"),
+
+    ("advisor/AdvisorScreen.kt",
+     'DetailScaffold(title = "导师信息", onBack = onBack) {',
+     "Column {",
+     "导师信息页不再用子页外壳 —— 它就没有标题栏与返回按钮了"),
+
+    ("grade/GradeScreen.kt",
+     "@OptIn(ExperimentalMaterial3Api::class)\n@Composable\nfun GradeScreen(",
+     "@file:OptIn(ExperimentalMaterial3Api::class)\n\n@Composable\nfun GradeScreen(",
+     "改用 @file:OptIn 全文件开口 —— 实验 API 的影响范围被盖住，看不见了"),
 ]
 
 # 只改**检查脚本自己**的变异：验证 §0「配对判据自证」不是摆设。

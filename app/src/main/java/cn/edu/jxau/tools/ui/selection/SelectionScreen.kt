@@ -45,13 +45,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.RushState
 import cn.edu.jxau.tools.data.model.SelectionScope
 import cn.edu.jxau.tools.data.model.SelectionStats
+import cn.edu.jxau.tools.ui.JxauTopBar
+import cn.edu.jxau.tools.ui.jxauTopBarScroll
 import cn.edu.jxau.tools.ui.profile.StatusTag
+import cn.edu.jxau.tools.ui.rememberJxauTopBarScrollBehavior
 import cn.edu.jxau.tools.ui.rush.RushScreen
 
 /**
@@ -65,6 +67,8 @@ import cn.edu.jxau.tools.ui.rush.RushScreen
  * 「抢课任务」那一半就是原来的 `RushScreen`，**行为一行没改**，
  * 只是从底部 Tab 降级成了内层视图（它订阅的 `RushStore` 是单例，位置变了订阅不变）。
  */
+// 顶栏的折叠行为（`TopAppBarScrollBehavior`）在 M3 里仍是实验 API，用到它的页面各自显式 opt-in。
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
     // 存名称而不是序号：以后插入新的内层视图不会把用户当下所在的那一半读成另一半
@@ -72,19 +76,38 @@ fun SelectionScreen(viewModel: SelectionViewModel = viewModel()) {
     val tab = SelectionTab.of(tabName)
     val tasks by viewModel.rushTasks.collectAsState()
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // 顶栏可折叠：向下滚收起、向上滚回来（接线见 Modifier.jxauTopBarScroll）。
+    // 「课程 / 抢课任务」那排标签**不跟着收**——它是这一页的导航，不该滚走。
+    val barBehavior = rememberJxauTopBarScrollBehavior()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .jxauTopBarScroll(barBehavior),
+    ) {
+        JxauTopBar(title = "选课", scrollBehavior = barBehavior)
         SelectionTabRow(
             current = tab,
             pendingCount = tasks.count { it.state == RushState.WAITING },
             onPick = { tabName = it.name },
         )
-        when (tab) {
-            SelectionTab.COURSES -> SelectionCourses(
-                viewModel = viewModel,
-                onGoRush = { tabName = SelectionTab.RUSH.name },
-            )
 
-            SelectionTab.RUSH -> RushScreen(modifier = Modifier.weight(1f))
+        // ⚠️ 这层 `Box(weight(1f))` 把「顶栏与标签行以下的剩余空间」显式框出来：
+        // 两半内容的根都是 `fillMaxSize()`，直接放在 Column 里就要去赌「非 weight 子项拿到的是
+        // 整页高度还是剩余高度」—— 赌错的后果是多出一个顶栏的高度、列表最后一条被底部导航盖住。
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            when (tab) {
+                SelectionTab.COURSES -> SelectionCourses(
+                    viewModel = viewModel,
+                    onGoRush = { tabName = SelectionTab.RUSH.name },
+                )
+
+                SelectionTab.RUSH -> RushScreen(modifier = Modifier.fillMaxSize())
+            }
         }
     }
 }

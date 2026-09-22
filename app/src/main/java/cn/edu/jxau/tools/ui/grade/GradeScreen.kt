@@ -45,54 +45,83 @@ import cn.edu.jxau.tools.data.model.GradeItem
 import cn.edu.jxau.tools.data.model.GradeSummary
 import cn.edu.jxau.tools.data.model.PassState
 import cn.edu.jxau.tools.data.model.TermGrades
+import cn.edu.jxau.tools.ui.JxauTopBar
+import cn.edu.jxau.tools.ui.jxauTopBarScroll
 import cn.edu.jxau.tools.ui.profile.StatusTag
+import cn.edu.jxau.tools.ui.rememberJxauTopBarScrollBehavior
 
+// 顶栏的折叠行为（`TopAppBarScrollBehavior`）在 M3 里仍是实验 API，用到它的页面各自显式 opt-in。
+// 不用 `@file:OptIn`：这一页只有 `GradeScreen` 一个函数碰它，收紧到函数上更清楚。
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GradeScreen(viewModel: GradeViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(Unit) { viewModel.load() }
 
-    when (state.phase) {
-        GradeUiState.Phase.Idle, GradeUiState.Phase.Loading -> CenterBox {
-            CircularProgressIndicator(modifier = Modifier.size(30.dp))
-            Spacer(Modifier.height(10.dp))
-            Text(state.message.ifBlank { "正在读取成绩…" }, style = MaterialTheme.typography.bodyMedium)
-        }
+    // 顶栏可折叠：向下滚收起、向上滚回来（接线见 Modifier.jxauTopBarScroll）。每个页面各记一个，
+    // 与其它 Tab 不共享状态。
+    val barBehavior = rememberJxauTopBarScrollBehavior()
 
-        GradeUiState.Phase.Failed -> CenterBox {
-            Text(
-                state.message.ifBlank { "读取失败" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .jxauTopBarScroll(barBehavior),
+    ) {
+        JxauTopBar(title = "成绩", scrollBehavior = barBehavior)
 
-        GradeUiState.Phase.Ready -> {
-            val summary = state.summary
-            if (summary == null || summary.isEmpty) {
-                CenterBox {
+        // ⚠️ 这层 `Box(weight(1f))` 不能省：下面的 `CenterBox` 与 `GradeList` 都写的是
+        // `fillMaxSize()`，而「非 weight 子项拿到的 maxHeight 到底是整页还是剩余」
+        // 是个不该靠记忆去赌的细节 —— 猜错的后果是列表整体多出一个顶栏的高度、
+        // 最后一条成绩被底部导航盖住（能编译、能滚、看不出是布局错了）。
+        // 用 weight 把「顶栏以下的剩余空间」显式框出来，里面的 `fillMaxSize()` 就只有一个含义。
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            when (state.phase) {
+                GradeUiState.Phase.Idle, GradeUiState.Phase.Loading -> CenterBox {
+                    CircularProgressIndicator(modifier = Modifier.size(30.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text(state.message.ifBlank { "正在读取成绩…" }, style = MaterialTheme.typography.bodyMedium)
+                }
+
+                GradeUiState.Phase.Failed -> CenterBox {
                     Text(
-                        state.message.ifBlank { "没有查询到成绩记录。" },
+                        state.message.ifBlank { "读取失败" },
                         style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp),
                     )
                     Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
+                    Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
                 }
-            } else {
-                GradeList(
-                    summary = summary,
-                    visibleTerms = state.visibleTerms,
-                    onlyFailed = state.onlyFailed,
-                    onToggleFilter = viewModel::toggleOnlyFailed,
-                    onPick = viewModel::showDetail,
-                )
+
+                GradeUiState.Phase.Ready -> {
+                    val summary = state.summary
+                    if (summary == null || summary.isEmpty) {
+                        CenterBox {
+                            Text(
+                                state.message.ifBlank { "没有查询到成绩记录。" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
+                        }
+                    } else {
+                        GradeList(
+                            summary = summary,
+                            visibleTerms = state.visibleTerms,
+                            onlyFailed = state.onlyFailed,
+                            onToggleFilter = viewModel::toggleOnlyFailed,
+                            onPick = viewModel::showDetail,
+                        )
+                    }
+                }
             }
         }
     }
@@ -463,12 +492,18 @@ private fun DetailLine(label: String, value: String) {
     }
 }
 
+/**
+ * 加载中 / 失败 / 空态的居中区。`fillMaxSize()` 指的是**外面那层 `Box(weight(1f))` 给的空间**。
+ *
+ * `top = 76.dp` 是把原来「页面没有顶栏时的 140dp」减去顶栏的 64dp 得来的：
+ * 视觉位置与加顶栏之前一致。**改顶栏高度时这个数要跟着改。**
+ */
 @Composable
 private fun CenterBox(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 140.dp),
+            .padding(top = 76.dp),
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) { content() }

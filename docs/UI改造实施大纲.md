@@ -17,9 +17,9 @@
 所以真正的问题不是「没用 M3」，而是**在 M3 之上有 10 处偏离了 Pixel 的用法**。
 下面这份清单是逐个 grep 核出来的，不是印象：
 
-| # | 现状 | Pixel/M3 的做法 | 位置 | P1 结果 |
+| # | 现状 | Pixel/M3 的做法 | 位置 | 结果 |
 |---|---|---|---|---|
-| 1 | 全应用 **0 个 `TopAppBar`**；子页用自定义 `DetailScaffold`（`IconButton` + `Text`）当标题栏，主页干脆没有栏 | `Scaffold` + `TopAppBar`（主页 `LargeTopAppBar`，子页 `TopAppBar` + `navigationIcon`） | `ui/AppRoot.kt`、`ui/profile/ProfileScreen.kt` | ⏳ 待你定（§1.1 A3 三选一） |
+| 1 | 全应用 **0 个 `TopAppBar`**；子页用自定义 `DetailScaffold`（`IconButton` + `Text`）当标题栏，主页干脆没有栏 | `Scaffold` + `TopAppBar`（子页 `TopAppBar` + `navigationIcon`） | `ui/AppBars.kt`（新）、`ui/profile/ProfileScreen.kt` | ✅ 已改（用户拍板选项 (a)：课表页**不加**，见 §1.1 A3） |
 | 2 | ~~设置页是**卡片墙**：每节一张 `Card` + 内嵌标题~~ | ~~「分组容器 + `ListItem` 行」~~ | ~~`ui/profile/DetailParts.kt::SectionCard`~~ | ❌ **这条也是误判，见 §0.4** |
 | 3 | **`ListItem` 0 处**，所有列表行手写 `Row` | 用 `ListItem`（自动处理前导/标题/副标题/尾随） | 全 ui 包 | ✅ 已改（`ProfileScreen.NavRow`） |
 | 4 | 内层切换用 **M2 式 `TabRow`**（下划线指示器） | `PrimaryTabRow` / `SecondaryTabRow`（pill 指示器） | `ui/selection/SelectionScreen.kt:115` | ✅ 已改 |
@@ -143,24 +143,39 @@
 **56dp**，而它现在是约 48dp —— 一学期十几二十门课，一屏能少看两条。这条的取舍是「更合 M3 规格」
 对「成绩列表的单位屏信息量」，**我不替你定**。要改的话位置是 `GradeRow`。
 
-**A3 骨架层：加 `TopAppBar`（影响面最大，单独一批）**
+**A3 骨架层：加 `TopAppBar`（影响面最大，单独一批）** —— ✅ **已采纳 (a) 并交付（P3）**
 
-主页四个 Tab 各加一条 `LargeTopAppBar`（可折叠），子页 `DetailScaffold` 换成
-`Scaffold` + `TopAppBar` + `navigationIcon`。
-
-⚠️ **这一层有个真实取舍，必须你定**：`TopAppBar` 会吃掉 64dp 左右的垂直空间，
+⚠️ **这一层有个真实取舍，用户拍板选了 (a)**：`TopAppBar` 会吃掉 64dp 左右的垂直空间，
 而**课表页要竖着滚 11 节**，屏幕高度是它的命根子。三个选项：
 
-- (a) 只给「我的」「成绩」「选课」加顶栏，**课表页不加以保住高度**（顶栏用可折叠，滚动时收成 0 高度）
+- **(a) 只给「我的」「成绩」「选课」加顶栏，课表页不加 ✅ 采纳**（顶栏可折叠，滚动时收成 0 高度）
 - (b) 全部加，课表页顶栏做成滚动即收起（`TopAppBarScrollBehavior`）—— 视觉统一，但滚动逻辑多一处状态
 - (c) 不加 `TopAppBar`，维持现状的自定义标题栏（只是把样式对齐 M3 规格）
 
-我倾向 **(a)**：课表是这应用的主战场，一寸高度都不该让给装饰；而其它页有顶栏确实更像原生。
+### A3 实际怎么落的（三处与本节原写法不同的地方，都是实施时才定下来的）
+
+1. **顶栏不在 `AppRoot` 的 `Scaffold` 里，而是各页自己画**（`ui/AppBars.kt::JxauTopBar`）。
+   原方案写的是「主页四个 Tab 各加一条」。改成各页自己画有两个硬理由：
+   - 「我的」页的子页与首页**各有各的标题与返回按钮**，顶栏放 `AppRoot` 就得把子页状态提上去；
+   - 更要紧的是：`AppRoot` 一旦有统一的 `topBar` 槽，**课表页会跟着一起长顶栏** ——
+     选项 (a) 就废了。所以「课表页不加」这件事**只能靠顶栏不在那一层**来保证。
+2. **不用 `LargeTopAppBar`，用小 `TopAppBar` + `enterAlways`**。原方案写的是 `LargeTopAppBar`，
+   但 `LargeTopAppBar` 收起来**仍然是 64dp 的小标题栏**（它只是把大标题卷上去），**永久占着 64dp**。
+   要「滚了就完全让出空间」只有小顶栏 + `enterAlways` 做得到 —— 这正是 (a) 括号里那句
+   「滚动时收成 0 高度」的意思。
+3. **子页顶栏固定不动**（不接折叠）：返回按钮滑出屏幕后，用户得先往回滚才能退出子页。
+
+另外顺手统一了两件原方案没写、但必须一致的事（写进 `AppBars.kt` 的 KDoc）：
+`windowInsets` 置 0（`AppRoot` 的 `Scaffold` 已经给过一次状态栏内边距，顶栏再吃一次会多一条空白）、
+容器色取 `background`（否则状态栏那一条会露出一道色带）。
 
 ### 1.2 顺带的收益与代价
 
 - 收益：`ListItem` 化之后，行高、点击波纹、无障碍语义都由 M3 保证，比手写 `Row` 更稳。
-- 代价：**4 个像素/几何测量脚本要重新标定**（见 §5），因为课表内容区在屏幕上的 y 起点会变。
+- ~~代价：**4 个像素/几何测量脚本要重新标定**（见 §5），因为课表内容区在屏幕上的 y 起点会变。~~
+  → **❌ 这条随着选项 (a) 作废**：顶栏只加给「我的/成绩/选课」，**课表页的布局一个像素没动**，
+  课表格子区的 y 起点不变，所以 4 个像素脚本的截图基准仍然有效（P0 那批截图不用重截）。
+  这正是选 (a) 而不是 (b) 的额外好处 —— 原方案把这个代价写成了必然，是把两个选项混在一起算了。
 
 ---
 
@@ -310,7 +325,7 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 | 进程内自检 19 组 520 项 | `TimetableSizeSpec`（含穷举）、`ColorThemeSpec`、`JxauPalette` 三组要重算期望值 | ✅ 已重算并实跑：**263 项全绿**（新增 1 组字体链路） |
 | `tools/verify_p1_pages.py`、`verify_boot_restore.py`、`verify_course_palette.py` | P1 改了 6 个 UI 文件的控件与文案 → 理论上可能被字面量绑定 | ✅ **P1 无影响**：逐条 grep 过，没有一个依赖被改的控件/文案；纯逻辑一行未动 |
 | P2 改的 `ProfileScreen.kt` / `DetailParts.kt` | 同上 | ✅ **P2 也无影响**：同样逐条 grep 过；`ProfileScreen` 没有对应的对账脚本，`DetailParts` 的零件被 `verify_p1_pages.py` 用到但只依赖显示的**文本内容**，两轮都没改过那些文案 |
-| `tools/verify_ui_controls.py`（**P1 新增，P2 扩到 23 项**） | 无既有资产覆盖「控件归位 + 颜色配对」→ 新增 | ✅ 23 项全 PASS（P2 又加了一节 §5 覆盖分组容器与列表行）；配套 `probe_ui_controls.py` 15 条变异全 CAUGHT |
+| `tools/verify_ui_controls.py`（**P1 新增，P2 扩到 23 项，P3 扩到 37 项**） | 无既有资产覆盖「控件归位 + 颜色配对 + 顶栏约定」→ 新增 | ✅ 37 项全 PASS（P2 加 §5 分组容器与列表行，P3 加 §6 顶栏）；配套 `probe_ui_controls.py` **27 条变异全 CAUGHT** |
 
 > **P1 的验证资产结论**：这轮改动全部落在 `ui/` 包（控件替换 + 一个共用组件抽取），
 > `data/` 与 `ui/theme/` 的纯逻辑一行没碰。所以「263 项自检」「32/32 主题对账」
@@ -362,8 +377,15 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 15. ⏭️ 【刻意没做】`GradeScreen.GradeRow` 的 `ListItem` 化 —— 行高 48 → 56dp，
     与「成绩列表单位屏信息量」冲突，**留给你定**（见 §1.1 A2 末尾）
 
-**P3 —— 骨架层（影响面最大，单独一批）**
-16. `TopAppBar`（按 §1.1 A3 的三选一，需要你拍板）
+**P3 —— 骨架层 —— ✅ 已完成（2026-09-22，按 §1.1 A3 选项 (a)）**
+16. ✅ 新增 `ui/AppBars.kt`（`JxauTopBar` + `rememberJxauTopBarScrollBehavior` + `Modifier.jxauTopBarScroll`）：
+    三处约定（`windowInsets` 置 0 / 容器色 `background` / 折叠接线）统一在一个地方说
+17. ✅ 「我的 / 成绩 / 选课」三个主页各加一条可折叠顶栏（小 `TopAppBar` + `enterAlways`）
+18. ✅ 「我的」页 Hub 拆成「顶栏 + 滚动内容」两层（折叠接线必须挂在滚动容器的祖先上）
+19. ✅ `DetailScaffold` 的手写 `Row(IconButton + Text)` → `JxauTopBar`（12 个子页自动跟上）
+20. ⛔ **刻意不加**：课表页（`TimetableScreen`）与 `AppRoot` 都不含顶栏 —— 由
+    `verify_ui_controls.py` §6 两条断言守着，探针里也有两条对应的变异
+21. ✅ 【清单外，顺手】删掉 `SelectionScreen.kt` 里一个改动前就已无用的 `import ...unit.sp`
 
 ---
 
@@ -378,14 +400,15 @@ checkInt("$tag 主题间 primary 最小距离", best, if (dark) 207 else 282, 10
 
 ---
 
-## 8. 待确认（原 4 条 —— ①②③④ 已于 P0 拍板，现只剩 A3 与 `GradeRow` 两条）
+## 8. 待确认（原 4 条已全部拍板；现只剩 `GradeRow` 行高一条开着）
 
-> **本节的历史状态**：写大纲时列了 4 条待确认，用户在拍板 P0 时一并定了其中三条、
-> 并额外要求了原属 P2 的「自定义色相」。下面保留原选项文本（方便回溯当时在权衡什么），
-> 每条后面标了**最终结论**。**真正还开着的只剩最后一条（A3 顶栏）与 `GradeRow` 行高。**
+> **本节的历史状态**：写大纲时列了 4 条待确认，用户在拍板 P0 时定了其中三条、
+> 并额外要求了原属 P2 的「自定义色相」；A3 顶栏在 P3 开工前拍板选了 (a)。
+> 下面保留原选项文本（方便回溯当时在权衡什么），每条后面标了**最终结论**。
+> **真正还开着的只剩最后一条：`GradeScreen.GradeRow` 要不要 `ListItem` 化。**
 
-**① Pixel 化做到哪一层？** → **结论：A1 + A2 已交付（P1 `8f3100d` / P2 `9c2de8a`）；
-A3 未定，见下。**
+**① Pixel 化做到哪一层？** → **结论：(a) 的精简版 = A1 + A2 + A3(变体 a)**，三批都已交付
+（P1 `8f3100d` / P2 `9c2de8a` / P3 见 §9 第 5 条）。**课表页不负这个代价**。
 - (a) 只 A1 控件层 —— 改动最小，但"还是不像原生"
 - (b) A1 + A2 设置页列表化 —— 我认为性价比最高
 - (c) A1 + A2 + A3 顶栏 —— 最像 Pixel，但课表页要为顶栏让出垂直空间
@@ -402,8 +425,7 @@ A3 未定，见下。**
 **间隙与字号独立可调不做**（见 §7）。
 - 原推荐「只宽高加密 + 字号推导斜率改小」，间隙与字号独立可调**不做**。
 
-**⑤ 【仍开着的】A3 顶栏** → 三选一见 §1.1 A3，我推荐 (a)：**课表页不加顶栏**。
-需要你拍板才能开工。
+**⑤ A3 顶栏** → **结论 (a)**：只给「我的/成绩/选课」加，**课表页不加**。已交付（见 §1.1 A3 实施说明）。
 
 **⑥ 【仍开着的】`GradeScreen.GradeRow` 要不要 `ListItem` 化** → 见 §1.1 A2 末尾：
 M3 两行行高下限 56dp，它现在约 48dp，改了会少看两条成绩。我不替你定。
@@ -442,7 +464,7 @@ M3 两行行高下限 56dp，它现在约 48dp，改了会少看两条成绩。�
      bash tools/probe_ui_controls.sh      # = verify_ui_controls.py + probe_ui_controls.py，外层再套一次独立进程 md5 复核
      ```
      结果：`verify_ui_controls.py` **15 项全 PASS**；`probe_ui_controls.py` **10 条变异 10 条 CAUGHT**，
-     （P2 之后这两个数字变成 23 项 / 15 条，见第 4 条），真实源码 md5 未变。它查的是「改完之后应该是什么样」：
+     （P2 之后这两个数字变成 23 项 / 15 条、P3 之后 37 项 / 27 条，见第 4、5 条），真实源码 md5 未变。它查的是「改完之后应该是什么样」：
      - §0 配对判据自证（12 个已知好/坏样本，**含当时那个真 bug**）
      - §1 6 处 `StatusTag` 的容器色/内容色必须成套
      - §2 全部 `容器色 to 内容色` 配对成套（exam / rush 用这种写法）
@@ -476,7 +498,24 @@ M3 两行行高下限 56dp，它现在约 48dp，改了会少看两条成绩。�
    - 真机部分（你跑）：首页四个分组的**入口行** —— 图标仍是主色、摘要仍是次要色（不是一层灰）、
      行高与之前一致、点整行任意位置都能进子页（含最右侧箭头那一带）；分组标题与卡片内图标左对齐；
      分隔线比之前略明显（有意）。
-5. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
+5. **P3（顶栏骨架层）的验证 —— ✅ 离线部分已完成**：
+   - 编译：`:app:compileDebugKotlin --rerun-tasks` **零 `e:` 零 `w:`**（`tools/out/p3-compile.log`）。
+   - `tools/verify_ui_controls.py` 扩到 **37 项全 PASS**（新增 §6 共 14 条）；`probe_ui_controls.py`
+     扩到 **27 条变异 27 条 CAUGHT**（新增 12 条针对 §6）。真源码 md5 前后未变，独立进程复核一致。
+   - 回归：`kotlin-check` 263/263 · `verify_theme_palette` 32/32 · `verify_preferences` 全对上 ·
+     `verify_p1_pages` 54/54。**P3 没有让任何既有资产失效** —— 课表页一个像素没动，
+     所以 4 个像素脚本的结论（连截图基准）都不用重标。
+   - ⚠️ 这轮编译报错三轮，全是**必须看报错才学得到**的东西：
+     ① `nestedScroll` 在 `androidx.compose.ui.input.nestedscroll`，**不在** `foundation`；
+     ② `TopAppBarScrollBehavior` 是实验 API，**出现在自己函数的签名里就会让所有调用点都要 opt-in**
+     （连只传 `null` 的那一处也一样）—— 这是 Kotlin 的传播规则，`@OptIn` 只压住定义处；
+     ③ 我自己在编辑时留下了一个重复的 `@Composable`（KDoc 前后各一个），编译器直接报
+     `This annotation is not repeatable` —— 手改注释位置时的典型事故。
+   - ⚠️ **新脚本自己的两条断言第一版就误报**，其中一条尤其值得记：`@file:OptIn` 那条 FAIL 了，
+     原因是**我自己的注释里写了「不用 `@file:OptIn`」** —— 又一次「注释把断言喂饱」，
+     只是这次方向相反（注释造成误报，不是漏报）。修法同样是 `strip_comments()`。
+   - 真机部分（你跑）：见 `docs/UI改造真机验收清单.md` **§4**。
+6. **每完成一批落一次中文 git 提交**，写清「改了什么 + 为什么 + 怎么验证的」。
 
 ### 新工具：离线纯函数自检（`tools/kotlin-check/`）
 
@@ -497,7 +536,7 @@ bash tools/kotlin-check/probe.sh   # 变异探针：逐个改坏副本，断言�
 ### 新工具：UI 控件静态对账 + 变异探针（`tools/verify_ui_controls.py` / `probe_ui_controls*`）
 
 ```bash
-python tools/verify_ui_controls.py          # 23 项静态断言；有 FAIL 退出码 1
+python tools/verify_ui_controls.py          # 37 项静态断言；有 FAIL 退出码 1
 python tools/probe_ui_controls.py           # 逐条改坏副本，断言上面的脚本必须报 FAIL
 bash   tools/probe_ui_controls.sh           # 上面两个 + 另起进程 md5 复核真实源码
 ```

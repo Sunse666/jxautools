@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""UI 控件归位静态对账（P1）。
+"""UI 控件归位 + 骨架层静态对账（P1 / P2 / P3）。
 
 ## 为什么需要这个脚本
 
@@ -14,8 +14,12 @@ P1 做的是一批「不会编译报错、也不会被运行时自检发现」�
    没有任何东西会拦他 —— 除非有一条断言写着「这几样现在是 0 处」。
 3. **两个本该分工的容器混用**（P2）。`SectionCard`（信息展示）与 `SettingsGroup`（设置项）
    一旦有一个跑到别处去定义、或者有人把 `ListItem` 退回手写 `Row`，同样没人拦。
+4. **顶栏的三处约定与一个设计决定**（P3，见 §6）。`windowInsets` 多吃一次状态栏内边距、
+   折叠接线漏了、页面标题复制粘贴串页 —— 三样都是「能编译、界面不崩、行为悄悄不对」；
+   而「课表页不加顶栏」这个用户拍板的取舍，一旦有人在 `AppRoot` 里加了统一的 `topBar`
+   就会被无声推翻（代价是课表矮 64dp）。
 
-所以这个脚本断言的是 **P1 的「改完之后应该是什么样」**，不是「代码能跑」。
+所以这个脚本断言的是 **「改完之后应该是什么样」**，不是「代码能跑」。
 它同时自带一组**已知坏样本**做自证（见 §0），否则「全部 PASS」可能只是查了个空。
 
 ## 已知局限（写出来，免得被当成保证）
@@ -387,6 +391,98 @@ def check_list_items():
           ".padding(horizontal = 14.dp, vertical = 12.dp)" in profile, False)
 
 
+# ---------------------------------------------------------------- §6 顶栏骨架层（P3）
+def check_top_bars():
+    """P3：加了 M3 顶栏，且**课表页刻意不加**（用户拍板，大纲 §1.1 A3 选项 (a)）。
+
+    这一节里最要紧的一条是「课表页与 AppRoot 不许出现顶栏」：
+    `AppRoot` 一旦有了统一的 `topBar` 槽，四个 Tab 会一起加上顶栏，
+    而课表页要竖着滚 11 节、高度是它的命根子 —— 但**加了也能编译、界面也不崩**，
+    只是课表矮了 64dp。这种「设计决定被无声推翻」正是本脚本要拦的东西。
+    """
+    bars = SOURCES.get(os.path.join(UI, "AppBars.kt"), "")
+    grade = SOURCES.get(os.path.join(UI, "grade", "GradeScreen.kt"), "")
+    selection = SOURCES.get(os.path.join(UI, "selection", "SelectionScreen.kt"), "")
+    profile = SOURCES.get(os.path.join(UI, "profile", "ProfileScreen.kt"), "")
+    timetable = SOURCES.get(os.path.join(UI, "timetable", "TimetableScreen.kt"), "")
+    app_root = SOURCES.get(os.path.join(UI, "AppRoot.kt"), "")
+
+    if not bars:
+        check("§6 AppBars.kt 存在", False, True)
+        return
+
+    # ---- 唯一实现处：所有顶栏都走 JxauTopBar，裸 TopAppBar 只允许在 AppBars.kt 里出现一次 ----
+    # 期望写成「恰好一个元素且是 AppBars.kt」：删光（有人把 JxauTopBar 掏空）与增加（有人在页面里
+    # 直接写 TopAppBar）都会 FAIL。`TopAppBarDefaults.topAppBarColors(` 不会被匹配到：
+    # 名字后面必须紧跟 `(`，且名字前面不许是标识符字符。
+    bare = [rel(p) for p, src in SOURCES.items() for _ in find_calls(src, "TopAppBar")]
+    check("§6 裸 `TopAppBar(` 只有一处，且在 AppBars.kt",
+          bare, [rel(os.path.join(UI, "AppBars.kt"))])
+
+    # 调用点 4 处：成绩 / 选课 / 我的（三个主页 Hub）+ DetailScaffold（子页外壳）。
+    # 将来真要在别处加一条顶栏，就把这个数改掉并写清是哪一处 —— 刻意的摩擦。
+    call_sites = [(rel(p), line) for p, src in SOURCES.items() for line, _ in find_calls(src, "JxauTopBar")]
+    check("§6 JxauTopBar 调用点 4 处", len(call_sites), 4)
+
+    # 标题串页是纯静默缺陷：复制一页改标题时最容易漏掉，而界面上要连点两个 Tab 才能发现。
+    want_titles = (
+        ("grade/GradeScreen.kt", grade, 'JxauTopBar(title = "成绩"'),
+        ("selection/SelectionScreen.kt", selection, 'JxauTopBar(title = "选课"'),
+        ("profile/ProfileScreen.kt", profile, 'JxauTopBar(title = "我的"'),
+    )
+    wrong_title = [name for name, src, want in want_titles if want not in strip_comments(src)]
+    check("§6 三个主页顶栏标题分别是 成绩 / 选课 / 我的（防复制粘贴串页）", wrong_title, [])
+
+    # ---- 选项 (a) 的护栏：课表页与 AppRoot 不许有顶栏 ----
+    leaked = [n for n, src in (("timetable/TimetableScreen.kt", timetable), ("AppRoot.kt", app_root))
+              if "TopAppBar" in strip_comments(src)]
+    check("§6 课表页与 AppRoot 不含任何顶栏（选项 a：课表不让出 64dp）", leaked, [])
+
+    # ---- 顶栏自身的三处约定 ----
+    bar_body = function_body(bars, "internal fun JxauTopBar(")
+    if bar_body is None:
+        check("§6 找到 JxauTopBar 函数体", False, True)
+        return
+    # 1. 不吃第二次状态栏内边距（AppRoot 的 Scaffold 已经给过）
+    check("§6 JxauTopBar 显式把 windowInsets 置 0", "WindowInsets(0, 0, 0, 0)" in bar_body, True)
+    # 2. 容器色与 Scaffold 同色，否则状态栏那一条会露出一条色带
+    check("§6 JxauTopBar 容器色取 background（与 Scaffold 同色）",
+          "containerColor = MaterialTheme.colorScheme.background" in bar_body, True)
+    # 3. 标题单行省略：子页标题是用户可见文案，过长会撑破顶栏
+    check("§6 JxauTopBar 标题单行省略", ("maxLines = 1" in bar_body and "TextOverflow.Ellipsis" in bar_body), True)
+
+    # ---- 折叠接线：漏了它顶栏永远不收，且界面上看不出来 ----
+    # ⚠️ helper 是**表达式体**（`= nestedScroll(...)`）而不是块体，`function_body` 找的是 `{`，
+    # 对它取不到正文 —— 所以这里直接匹配那一段调用原文（这个字面量已经足够具体）。
+    check("§6 折叠接线 helper 里真的调了 nestedScroll",
+          "nestedScroll(behavior.nestedScrollConnection)" in strip_comments(bars), True)
+    wired = [name for name, src in (("grade/GradeScreen.kt", grade),
+                                    ("selection/SelectionScreen.kt", selection),
+                                    ("profile/ProfileScreen.kt", profile))
+             if "jxauTopBarScroll(barBehavior)" not in strip_comments(src)]
+    check("§6 三个主页都把折叠接到了页面根容器", wired, [])
+
+    # ---- 子页外壳：换成 JxauTopBar，但**不折叠**（返回按钮不该滑走）----
+    detail = function_body(profile, "internal fun DetailScaffold(")
+    if detail is None:
+        check("§6 找到 DetailScaffold 函数体", False, True)
+        return
+    check("§6 DetailScaffold 用 JxauTopBar（不再是手写 Row）", "JxauTopBar(" in detail, True)
+    check("§6 DetailScaffold 的返回按钮语义完整",
+          ("KeyboardArrowLeft" in detail and 'contentDescription = "返回"' in detail), True)
+    check("§6 DetailScaffold 顶栏固定不动（返回按钮不该滑出屏幕）", "scrollBehavior" in detail, False)
+
+    # ---- 子页外壳的调用点：12 个子页都还在。少一个 = 某个子页没了标题栏与返回按钮 ----
+    check("§6 DetailScaffold 调用点仍有 12 处",
+          sum(len(find_calls(src, "DetailScaffold")) for src in SOURCES.values()), 12)
+
+    # ---- 实验 API 的 opt-in 收紧到函数，不许用 @file:OptIn 把整页盖住 ----
+    # ⚠️ 必须 `strip_comments`：本文件与 AppBars.kt 的注释里都写了「不用 `@file:OptIn`」，
+    # 不剥注释就会**因为注释本身**而 FAIL —— 和 P2 那次「注释把断言喂饱」是同一个坑的另一面。
+    blanket = [rel(p) for p, src in SOURCES.items() if "@file:OptIn" in strip_comments(src)]
+    check("§6 没有 `@file:OptIn` 全文件开口（实验 API 的影响范围要看得见）", blanket, [])
+
+
 def main():
     self_check_pairs()
     check_status_tags()
@@ -394,6 +490,7 @@ def main():
     check_controls()
     check_shapes()
     check_list_items()
+    check_top_bars()
 
     width = max(len(n) for _, n, _, _ in results)
     fails = 0

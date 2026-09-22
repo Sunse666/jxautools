@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,9 +86,12 @@ import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
+import cn.edu.jxau.tools.ui.JxauTopBar
 import cn.edu.jxau.tools.ui.advisor.AdvisorScreen
 import cn.edu.jxau.tools.ui.exam.ExamScreen
+import cn.edu.jxau.tools.ui.jxauTopBarScroll
 import cn.edu.jxau.tools.ui.plan.PlanScreen
+import cn.edu.jxau.tools.ui.rememberJxauTopBarScrollBehavior
 import cn.edu.jxau.tools.ui.student.StudentScreen
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.timetable.WeekTable
@@ -175,6 +179,8 @@ private enum class ProfilePage(val title: String, val icon: ImageVector) {
 
 // ---------- 首页（摘要 + 入口） ----------
 
+// 顶栏的折叠行为（`TopAppBarScrollBehavior`）在 M3 里仍是实验 API，用到它的页面各自显式 opt-in。
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Unit) {
     val repo = viewModel.repo
@@ -188,120 +194,135 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
 
     var confirmLogout by remember { mutableStateOf(false) }
 
+    // 顶栏可折叠：向下滚收起、向上滚回来
+    val barBehavior = rememberJxauTopBarScrollBehavior()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .jxauTopBarScroll(barBehavior),
     ) {
-        SectionCard("账号") {
-            InfoRow("账号", session?.account.orEmpty().ifBlank { "未知" })
-            InfoRow("通道", session?.channel?.label ?: "—")
-            InfoRow("会话", if (session?.isUsable == true) "有效" else "未登录")
-            InfoRow("静默续期", if (hasTgt) "已持有 TGT（免验证码）" else "无 TGT")
-            InfoRow("保活", if (keepalive) "运行中" else "未运行")
+        JxauTopBar(title = "我的", scrollBehavior = barBehavior)
+
+        // 内层才是滚动容器：`nestedScroll` 要挂在滚动容器的**祖先**上（这里是外层 Column），
+        // 所以顶栏与滚动内容必须是两层 —— 原来那种「一个 Column 既放内容又自己滚」的结构
+        // 没有地方可以挂接线，顶栏永远不会折叠。
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            SectionCard("账号") {
+                InfoRow("账号", session?.account.orEmpty().ifBlank { "未知" })
+                InfoRow("通道", session?.channel?.label ?: "—")
+                InfoRow("会话", if (session?.isUsable == true) "有效" else "未登录")
+                InfoRow("静默续期", if (hasTgt) "已持有 TGT（免验证码）" else "无 TGT")
+                InfoRow("保活", if (keepalive) "运行中" else "未运行")
+            }
+
+            // 「我的信息」= 教务系统里关于本人的只读资料。与下面几组的区别是：
+            // 这里的每一项都是**从服务端读回来的事实**，不能改，改了也没意义。
+            SettingsGroup("我的信息") {
+                NavRow(
+                    page = ProfilePage.Exam,
+                    title = "考试安排",
+                    summary = "本学期考试时间与考场",
+                    onOpen = onOpen,
+                    showDivider = false,
+                )
+                NavRow(
+                    page = ProfilePage.XueJi,
+                    title = "学籍信息",
+                    summary = "学号、院系专业、学籍状态（身份证等默认遮蔽）",
+                    onOpen = onOpen,
+                )
+                NavRow(
+                    page = ProfilePage.Advisor,
+                    title = "导师信息",
+                    summary = "各学期的导师组成员",
+                    onOpen = onOpen,
+                )
+                NavRow(
+                    page = ProfilePage.TermPlan,
+                    title = "学期规划",
+                    summary = "本人规划 · 导师方案与评价",
+                    onOpen = onOpen,
+                )
+            }
+
+            SettingsGroup("设置") {
+                NavRow(
+                    page = ProfilePage.Appearance,
+                    title = "外观主题",
+                    summary = prefs.themeSummary(systemDark),
+                    onOpen = onOpen,
+                    showDivider = false,
+                )
+                NavRow(
+                    page = ProfilePage.Font,
+                    title = "字体",
+                    summary = prefs.fontSummary(),
+                    onOpen = onOpen,
+                )
+                NavRow(
+                    page = ProfilePage.Timetable,
+                    title = "课表显示",
+                    summary = buildString {
+                        append("格子 ${prefs.timetableSize.periodHeightDp}dp · 列宽 ${prefs.timetableSize.columnWidthDp}dp")
+                        if (!prefs.timetableSize.isDefault) append("（已自定义）")
+                    },
+                    onOpen = onOpen,
+                )
+                NavRow(
+                    page = ProfilePage.WeekAnchor,
+                    title = "周次校准",
+                    summary = weekAnchorSummary(prefs.termAnchor),
+                    onOpen = onOpen,
+                )
+            }
+
+            SettingsGroup("会话与维护") {
+                NavRow(
+                    page = ProfilePage.Session,
+                    title = "会话与保活",
+                    summary = if (keepalive) "保活运行中 · $lastCheck" else "保活未运行 · $lastCheck",
+                    onOpen = onOpen,
+                    showDivider = false,
+                )
+                NavRow(
+                    page = ProfilePage.Mock,
+                    title = "本地演练",
+                    summary = if (mockActive) "演练中：请求打向本机 mock 服务端" else "未开启（选课窗口外验证抢课用）",
+                    onOpen = onOpen,
+                )
+                NavRow(
+                    page = ProfilePage.Diagnostics,
+                    title = "诊断与日志",
+                    summary = "纯逻辑自检 · 运行日志",
+                    onOpen = onOpen,
+                )
+            }
+
+            SettingsGroup("其他") {
+                NavRow(
+                    page = ProfilePage.About,
+                    title = "关于",
+                    summary = "版本 $APP_VERSION",
+                    onOpen = onOpen,
+                    showDivider = false,
+                )
+            }
+
+            OutlinedButton(
+                onClick = { confirmLogout = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("退出登录") }
+
+            Spacer(Modifier.height(8.dp))
         }
-
-        // 「我的信息」= 教务系统里关于本人的只读资料。与下面几组的区别是：
-        // 这里的每一项都是**从服务端读回来的事实**，不能改，改了也没意义。
-        SettingsGroup("我的信息") {
-            NavRow(
-                page = ProfilePage.Exam,
-                title = "考试安排",
-                summary = "本学期考试时间与考场",
-                onOpen = onOpen,
-                showDivider = false,
-            )
-            NavRow(
-                page = ProfilePage.XueJi,
-                title = "学籍信息",
-                summary = "学号、院系专业、学籍状态（身份证等默认遮蔽）",
-                onOpen = onOpen,
-            )
-            NavRow(
-                page = ProfilePage.Advisor,
-                title = "导师信息",
-                summary = "各学期的导师组成员",
-                onOpen = onOpen,
-            )
-            NavRow(
-                page = ProfilePage.TermPlan,
-                title = "学期规划",
-                summary = "本人规划 · 导师方案与评价",
-                onOpen = onOpen,
-            )
-        }
-
-        SettingsGroup("设置") {
-            NavRow(
-                page = ProfilePage.Appearance,
-                title = "外观主题",
-                summary = prefs.themeSummary(systemDark),
-                onOpen = onOpen,
-                showDivider = false,
-            )
-            NavRow(
-                page = ProfilePage.Font,
-                title = "字体",
-                summary = prefs.fontSummary(),
-                onOpen = onOpen,
-            )
-            NavRow(
-                page = ProfilePage.Timetable,
-                title = "课表显示",
-                summary = buildString {
-                    append("格子 ${prefs.timetableSize.periodHeightDp}dp · 列宽 ${prefs.timetableSize.columnWidthDp}dp")
-                    if (!prefs.timetableSize.isDefault) append("（已自定义）")
-                },
-                onOpen = onOpen,
-            )
-            NavRow(
-                page = ProfilePage.WeekAnchor,
-                title = "周次校准",
-                summary = weekAnchorSummary(prefs.termAnchor),
-                onOpen = onOpen,
-            )
-        }
-
-        SettingsGroup("会话与维护") {
-            NavRow(
-                page = ProfilePage.Session,
-                title = "会话与保活",
-                summary = if (keepalive) "保活运行中 · $lastCheck" else "保活未运行 · $lastCheck",
-                onOpen = onOpen,
-                showDivider = false,
-            )
-            NavRow(
-                page = ProfilePage.Mock,
-                title = "本地演练",
-                summary = if (mockActive) "演练中：请求打向本机 mock 服务端" else "未开启（选课窗口外验证抢课用）",
-                onOpen = onOpen,
-            )
-            NavRow(
-                page = ProfilePage.Diagnostics,
-                title = "诊断与日志",
-                summary = "纯逻辑自检 · 运行日志",
-                onOpen = onOpen,
-            )
-        }
-
-        SettingsGroup("其他") {
-            NavRow(
-                page = ProfilePage.About,
-                title = "关于",
-                summary = "版本 $APP_VERSION",
-                onOpen = onOpen,
-                showDivider = false,
-            )
-        }
-
-        OutlinedButton(
-            onClick = { confirmLogout = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("退出登录") }
-
-        Spacer(Modifier.height(8.dp))
     }
 
     if (confirmLogout) {
@@ -345,11 +366,23 @@ private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBac
 }
 
 /**
- * 子页统一外壳：返回按钮 + 标题 + 可滚动内容。
+ * 子页统一外壳：M3 顶栏（返回按钮 + 标题）+ 可滚动内容。
  *
  * `internal` 而不是 `private`：考试安排等子页挂在「我的」下，但代码分在各自包里，
  * 需要复用同一个外壳。样式统一由这里说了算，各页不要各画一套。
+ *
+ * ## 顶栏**固定不动**，不接折叠
+ * 主页那三条顶栏是可折叠的（见 `rememberJxauTopBarScrollBehavior`），这里刻意不接：
+ * 返回按钮滑出屏幕之后，用户得先往回滚才能退出子页 —— 那是最不该藏起来的控件。
+ *
+ * ## 与手写 `Row` 的区别（改这块前先看）
+ * 原来是 `Row { IconButton; Text(titleMedium) }` 手搓的。换成 [JxauTopBar] 之后：
+ * - 标题从 16sp `titleMedium` 变 M3 顶栏的 `titleLarge`（22sp，且跟随字号缩放），
+ *   高度从 54dp 变标准的 64dp —— 这是**有意**的，就是「要像 Pixel」的那一部分；
+ * - 左上角点击热区、图标的明暗与对齐由 M3 保证，不用再靠 `padding` 凑。
  */
+// 顶栏的折叠行为（`TopAppBarScrollBehavior`）在 M3 里仍是实验 API，碰它的函数各自显式 opt-in。
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun DetailScaffold(
     title: String,
@@ -357,17 +390,14 @@ internal fun DetailScaffold(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "返回")
-            }
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        }
+        JxauTopBar(
+            title = title,
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "返回")
+                }
+            },
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
