@@ -561,6 +561,83 @@ bash   tools/probe_ui_controls.sh           # 上面两个 + 另起进程 md5 �
 
 ---
 
+## 10. 缺陷：切页时的「字符粘连」（过渡期两层内容同时可见）
+
+> 2026-09-23 用户报告。**本节只做诊断与方案，代码未改** —— 修复方案待拍板。
+
+### 10.1 现象与可判定的判据
+
+切到别的页面时，上一页的字会短暂留在屏幕上，新页的控件直接盖在它上面/之间，过一会儿才消失。
+
+**判据（可判定，不靠肉眼）**：过渡的中间帧上，**同一片像素区域能同时读到两张页面各自独有的字形**。
+两页版式越不同（成绩列表 ↔ 课表 ↔ 我的首页），重影越刺眼；版式相近时它看起来像"正常的交叉淡入"，
+所以这个缺陷在过去几轮里一直没被当成问题 —— 它**不是纯视觉偏好，是两层内容真的同时在屏幕上**。
+
+### 10.2 根因：四环机制链（每一环都能指到代码）
+
+1. **`AnimatedContent` 的过渡语义 = 旧内容在过渡期内仍在组合树里、仍被绘制。**
+   全应用两个过渡入口都建在它上面：`ui/Motion.kt:115`（`MotionSwap`）、`ui/Motion.kt:154`（`MotionPager`）。
+   项目自己的注释已经写明这一点（`Motion.kt:141-144`「过渡结束后会把旧内容移出组合树」，
+   `AppRoot.kt:97-101` 复述同一句）→ **残留窗口 = 过渡时长**：`Motion.SwapMillis = 170` /
+   `SlideOutMillis = 200` / `SlideInMillis = 260`（`Motion.kt:51-62`）。
+   过渡一结束旧内容被移出 → 残留消失。这就是"过一会儿才消失"的全部来源。
+2. **两个页面的根节点都是透明的。** 全应用唯一的不透明底在 `MainActivity.kt:77` 的根 `Surface`
+   （`color = colorScheme.background`），它位于两个过渡层**之下**，遮不住旧层。
+   页面根一律是裸 `Column(fillMaxSize())`：`GradeScreen.kt:69-71`、`TimetableScreen.kt:69`、
+   `RushScreen.kt:61`、`LoginScreen.kt:83-85`，`ProfileScreen` / `SelectionScreen` 同理。
+   更上面那层 `AppRoot.kt:110` 的 `Scaffold` 容器色也一样在两层之下。
+3. **进入层带 `fadeIn`，于是它在整个过渡期都是半透明的。** `Motion.kt:121`（Swap：
+   `fadeIn + scaleIn`）、`Motion.kt:165-169`（Pager：`fadeIn + slideInHorizontally`）。
+   `fadeIn` 把 alpha 加在**进入层的整棵子树**上 —— 包括它自己的底色（如果将来补了底色）。
+   所以【**给页面根加底色单独并不够**】，这是整条链里最容易误判的一环。
+4. **盖得干净的只有自带不透明容器色的部件**：顶栏 `AppBars.kt:62`
+   （`containerColor = colorScheme.background`）、各类 `Card`（`DetailParts.kt:65/94`）。
+   它们把下面的旧字挡死，而页面根/列表/纯文本没底 → 视觉上就成了
+   「新页面的控件盖住了旧字，但字还在控件之间露出来」，正是用户描述的错位感。
+
+### 10.3 放大器（有代码位置，但都不是主因；两条未实测）
+
+- **`SizeTransform(clip = false)`**（`Motion.kt:232-235`）：过渡期内容不被裁到容器内。
+  对**整屏容器 + 半屏横移**（`MotionPager` 的 `it / 2`）不可见 —— 溢出部分落在屏幕外；
+  但对**比屏幕小的容器**会露出来：`ProfileScreen.kt:156` 的子页 Pager、`SelectionScreen.kt:112` 的两半。
+  ⚠️ **本次未实测**。
+- **嵌套过渡**：`AppRoot.kt:59`（登录门禁 Swap）→ `AppRoot.kt:129`（Tab Pager）→ 页内
+  `MotionSwap`（如 `GradeScreen.kt:86`）与 `ProfileScreen.kt:156`（子页 Pager）。
+  切 Tab 时外层的 260ms 正好盖住新页面的首次组合 + 首次数据加载（`LaunchedEffect { load() }`）；
+  缓存未命中时内层还有一次 Loading→Content 的 Swap，两个窗口会叠起来。
+- **掉帧**：课表页首次绘制要画两套 canvas。动画时长是**动画时钟时间**，掉帧会把它映射到更长的
+  真实时间，残留的实感更久。⚠️ **本次未取帧数据**。
+
+### 10.4 修复思路
+
+**核心判断：页面级切换不该用「交叉淡入」。** 交叉淡入的物理结果就是「两张版式在同一像素上混合」，
+只要进入层的 alpha 从 0 开始，重影必然存在 —— 这不是时长能解决的问题，调时长只是在缩短重影。
+
+| 方案 | 做法 | 作用 |
+|---|---|---|
+| **A（前提）** | 两个入口的 content lambda 外层统一包 `Box(Modifier.fillMaxSize().background(colorScheme.background))` | 一处改，覆盖 7 个 Swap + 3 个 Pager 调用点，新增页面自动受益。**单独用不足以根治**（见 10.2 第 3 环） |
+| **B1（根治·页面级）** | `MotionPager` 去掉进入侧 `fadeIn`，保留 `slideInHorizontally` | 位移已表达"新页来了"，淡入是多余的。去掉后进入层第一帧就不透明（配合 A），旧页在**被覆盖到的区域立刻消失**，只有还没滑到的区域露出旧页 —— 那是滑动的语义，不是残留 |
+| **B2（根治·同位置互换）** | `MotionSwap` 把进入侧 alpha 窗口压到 ~90ms，或改 `EnterTransition.None`（硬出现）；保留 `scaleIn` 以留住"浮出来"的手感，退出侧照旧 `fadeOut` 170ms | 重影窗口从 170ms 缩到 ≤90ms 或归零。**只改时长不改结构无效** |
+| **C（顺手补边界）** | 两个 `AnimatedContent` 容器加 `Modifier.clipToBounds()`（在 `Motion.kt` 内统一加，调用点不动） | 与 `SizeTransform(clip = false)` 不冲突：后者管"动画尺寸的裁剪"，前者管"不许画到容器外"。需逐点核容器是否定尺寸（3 Pager + 7 Swap） |
+| **D（不推荐）** | 保留完整交叉淡入 → 只能改成"旧页截图 + 新页不透明覆盖"的快照式过渡 | 代价远超收益 |
+
+### 10.5 怎么验证（判据要硬）
+
+1. **静态**：`verify_motion.py` 加 §9 —— 断言进入侧不含 `fadeIn`（B1）/ 含但时长 ≤ 阈值（B2），
+   且过渡层 content 外层含 `background(`；配 **变异探针**（把 `fadeIn` 加回去、把 `background(` 删掉）
+   必须让脚本报 FAIL，否则断言是空转。
+2. **真机慢速变异包**（已有武器，时长 ×8）：连拍过渡中间帧，断言**旧页独有字形与新页独有字形不得同时可见**
+   —— 取两处各自独有文案的像素列集合，判"同时非空"。修复前必然同时可见，修复后应互斥。
+3. **别误判**：`ProfileScreen` 子页返回时旧页在滑动中仍可见，那是滑动的正常语义。
+
+### 10.6 明确没验的（保持诚实）
+
+- **绘制顺序**（旧在下 / 新在上）按现象取用，没从字节码核过；若实际相反，对根因与修复无影响。
+- **`clip = false` 的实际可见性**（10.3 第 1 条）与**掉帧的实际贡献**（10.3 第 3 条）都没实测。
+- 修复后是否需要给页面根**也**加底色（即 A 是否可省）—— 取决于 B1/B2 选哪个，实施时一并验。
+
+---
+
 ## 附：本次调研读过的文件（便于复核）
 
 `ui/theme/Theme.kt` · `ui/theme/ColorThemeSpec.kt` · `data/model/Preferences.kt` ·
