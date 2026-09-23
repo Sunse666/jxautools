@@ -12,8 +12,10 @@
 # 退出码：0 全绿；1 有 FAIL；2 编译失败；3 环境缺件
 set -u
 
-# ⚠️ 路径一律写字面量正斜杠盘符：Git Bash 的 $(pwd) 给 /d/... ，Windows 的 java 解析不了
-ROOT="D:/IO/Android/jxautools"
+# ⚠️ 路径一律写字面量正斜杠盘符：Git Bash 的 $(pwd) 给 /d/... ，Windows 的 java 解析不了。
+# 所以这里用 `pwd -W`（Git Bash 专有：输出 D:/... 形式）而不是 `pwd`。
+# 不许写死绝对路径 —— 2026-09-23 目录改名（jxautools → jxautools Pro）会把写死的路径全打死。
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -W)"
 DEFAULT_APPSRC="$ROOT/app/src/main/java/cn/edu/jxau/tools"
 APPSRC="${1:-$DEFAULT_APPSRC}"
 CHECK="$ROOT/tools/kotlin-check"

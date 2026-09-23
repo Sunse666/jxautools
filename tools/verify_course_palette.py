@@ -16,10 +16,15 @@
 """
 import io
 import math
+import os
 import re
 import sys
 
-SRC = r"D:\IO\Android\jxautools\app\src\main\java\cn\edu\jxau\tools\ui\timetable\CoursePalette.kt"
+# ⚠️ 不许写死绝对路径：2026-09-23 目录改名（jxautools → jxautools Pro）后，
+# 写死的路径让本脚本直接 FileNotFoundError，而另外 8 个用 `__file__` 定位的脚本毫发无伤。
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "app", "src", "main", "java", "cn", "edu", "jxau", "tools",
+                   "ui", "timetable", "CoursePalette.kt")
 
 FAILS = []
 

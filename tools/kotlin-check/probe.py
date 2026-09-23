@@ -28,7 +28,10 @@ import shutil
 import subprocess
 import sys
 
-ROOT = "D:/IO/Android/jxautools"
+# ⚠️ 不许写死绝对路径：2026-09-23 目录改名（jxautools → jxautools Pro）后，
+# 写死的路径会让本探针直接找不到源码 —— 而「探针找不到目标」的表现是**静默失效**。
+# 三次 dirname = probe.py → kotlin-check → tools → 仓库根。反斜杠转正斜杠：ROOT 后面按 '/' 拼接。
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).replace("\\", "/")
 RUN_SH = ROOT + "/tools/kotlin-check/run.sh"
 REAL_SRC = ROOT + "/app/src/main/java/cn/edu/jxau/tools"
 SCRATCH = ROOT + "/tools/out/kotlin-check/scratch"

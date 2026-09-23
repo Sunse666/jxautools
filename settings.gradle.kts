@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "jxautools"
+rootProject.name = "jxautools Pro"
 include(":app")

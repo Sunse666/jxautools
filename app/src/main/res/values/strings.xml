@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">江农工具箱</string>
+    <!-- Pro 版主线。去抢课的精简分支应用名为「江农工具箱」（不带 Pro） -->
+    <string name="app_name">江农工具箱Pro</string>
 </resources>
