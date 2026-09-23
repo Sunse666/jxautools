@@ -134,6 +134,14 @@ MUTATIONS = [
      "slideInHorizontally(enterSlide) { dir * offsetPx }",
      "slideInHorizontally(enterSlide) { it / 2 }",
      "位移距离改回 `it / 2` 半屏（放大旧页可见区、大屏上过度）"),
+
+    # ---- 第 7 条针对 §9l/§9m（过渡层正下方那层的底色同源性）----
+    ("AppRoot.kt",
+     "    Scaffold(\n        bottomBar = {",
+     "    Scaffold(\n        containerColor = MaterialTheme.colorScheme.surface,\n"
+     "        bottomBar = {",
+     "过渡层正下方那层换了底色（`surface` #FFFFFF ≠ `background` #F8F9FC）—— "
+     "`scaleIn(0.92)` 的外圈会在过渡里露成一圈白边"),
 ]
 
 # 检查脚本自身的变异：证明 §0 自证那两条不是摆设。
@@ -145,6 +153,11 @@ CHECKER_MUTATIONS = [
     ("            end = t\n",
      "            end = j\n",
      "`call_spans` 不再纳入尾随 lambda（§0b 必须抓出来，否则 §4b/§5 恒真）"),
+
+    ("        elif depth == 0:\n            out.append(ch)\n",
+     "        elif True:\n            out.append(ch)\n",
+     "`drop_braces` 不再丢掉嵌套与尾随 lambda 的正文（§0g 必须抓出来，否则 §9m 会被下层"
+     "控件自己的 `containerColor` 喂饱成假阳性）"),
 ]
 
 

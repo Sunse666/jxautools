@@ -162,6 +162,30 @@ def fn_body(src, name):
     return rest[: nxt.start()] if nxt else rest
 
 
+def drop_braces(text):
+    """删掉所有花括号块（含嵌套）的**内容**，只留顶层文本。
+
+    用于判「某个键是不是这一层的**直接**参数」。`arg_of` 是括号配平扫描，会一路钻进嵌套里：
+    `Scaffold(bottomBar = { Card(containerColor = ...) })` 的 `containerColor` 明明属于 Card，
+    却会被当成 Scaffold 自己的参数（§9m 的假阳性来源）。
+
+    顺带也解决了「尾随 lambda」：`call_spans` 把 `{ ... }` 形式的尾随 lambda 一并拼进了返回的
+    参数串（§0b 需要那样），而它同样是花括号块 —— 一起被丢掉。
+    **所以这里不需要再单独切一次 lambda**（试过写 `paren_args`，结果那个函数是多余的：
+    把它改坏探针抓不住，因为它管的正是 `drop_braces` 已经在管的东西。多一层自认为有用的
+    防御，代价是一条永远抓不住的变异。）
+    """
+    out, depth = [], 0
+    for ch in text:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+        elif depth == 0:
+            out.append(ch)
+    return "".join(out)
+
+
 def kt_files():
     for dp, _, fns in os.walk(UI):
         for fn in sorted(fns):
@@ -229,6 +253,19 @@ def self_check():
           bool(fb) and "delayMillis = Motion.EnterFadeDelayMillis" in fb, True)
     check("§0e `fn_body` 不会串到下一个定义里（否则 §9c 会被别的函数喂饱）",
           "other" not in (fb or "other"), True)
+
+    # §9m 只在 Scaffold 的**顶层**参数里找键（`arg_of` 会钻括号，所以先丢掉嵌套花括号块）。
+    # 两件事必须同时成立，否则这条自证本身没判别力：
+    # 顶层键留得住（只会返回 None 的扫描器也能让「丢掉嵌套」通过）、
+    # 嵌套与尾随 lambda 里的键丢得掉（不然下层控件自己的 `containerColor` 会把 §9m 喂饱）。
+    sample = ("\n    containerColor = MaterialTheme.colorScheme.surface,\n"
+              "    bottomBar = {\n        Card(containerColor = surfaceVariant)\n    },\n"
+              ") { padding ->\n    Card(containerColor = errorContainer)\n}")
+    top = drop_braces(sample)
+    check("§0g `drop_braces` 自证（顶层键留得住、嵌套与 lambda 里的键丢掉；"
+          "否则 §9m 恒真或假阳性）",
+          (arg_of(top, "containerColor"), top.count("containerColor")),
+          ("MaterialTheme.colorScheme.surface", 1))
 
 
 # ---------------------------------------------------------------- §1 唯一入口
@@ -401,7 +438,7 @@ def check_easing():
 
 # ---------------------------------------------------------------- §9 alpha 窗口
 def check_alpha_windows():
-    """2026-09-23「切页字符粘连」的三条判据。
+    """2026-09-23「切页字符粘连」那一批的判据：alpha 结构 + 每层底色。
 
     这一节守的是一类**只有肉眼能看出来**的退化：把进入侧的 delay 去掉、把退出时长调长、
     把每层内容的底色删掉 —— 三种改法都编译通过、界面不崩、动画照跑，
@@ -464,6 +501,30 @@ def check_alpha_windows():
           (2, []))
     check("§9k 位移距离取自 `Motion.SharedAxisOffsetDp`（固定 dp，不按屏宽算）",
           "Motion.SharedAxisOffsetDp" in body and body.count("offsetPx") >= 3, True)
+
+    # ⑦ 过渡层**正下方**那层的底色必须与它同源。`Scaffold` 不传 `containerColor` 时默认就是
+    #    `colorScheme.background`（与 `MotionLayer`、顶栏 `AppBars.kt:62` 一致）；一旦有人显式传
+    #    别的色，过渡中途就会露出色差 —— 本仓库 `background = #F8F9FC` 而 `surface = #FFFFFF`
+    #    （`Theme.kt:43/46`），而 `MotionSwap` 的 `scaleIn(0.92)` 会让进入层缩到 92%，
+    #    外圈露的正是这层底色 → 一圈白边在淡入。
+    #    ⚠️ 它守的**不是**「旧页透出」（那条由 ①/③/④ 守着），而是「底色的同源性」——
+    #    两件事都属于「过渡期视觉不干净」，且都是编译器、自检与运行时都不报的那类。
+    #    根 `Surface`（`MainActivity.kt`，在 `ui/` 之外）不在这条里：它被不透明的 `Scaffold`
+    #    整片盖住，过渡期从来不是可见层。
+    scafs, off_color = 0, []
+    for p, src in SOURCES.items():
+        for line, args in call_spans(strip_comments(src), "Scaffold"):
+            scafs += 1
+            cc = arg_of(drop_braces(args), "containerColor")
+            if cc is not None and cc != "MaterialTheme.colorScheme.background":
+                off_color.append(f"{rel(p)}:{line} containerColor = {cc}")
+    # 数量也要断言：扫到 0 处时「没有异色」会恒真 —— 本仓库反复踩的那个「空扫描喂饱断言」。
+    # 另一层自证：`DetailScaffold(` 不能被算进来（它是 `Column(fillMaxSize())` + 顶栏，不是 Scaffold），
+    # 全应用 13 处 `DetailScaffold(` 全排除掉之后应该正好剩 1 处。
+    check("§9l 参与层次的真 `Scaffold` 只有一处（`DetailScaffold` 是 Column，不算；"
+          "扫到 0 处或扫进 DetailScaffold 都说明扫描器错了）", scafs, 1)
+    check("§9m `Scaffold` 不覆盖默认容器色（它就在过渡层正下方，异色会在过渡里露成一圈白边）",
+          sorted(off_color), [])
 
 
 def main():
