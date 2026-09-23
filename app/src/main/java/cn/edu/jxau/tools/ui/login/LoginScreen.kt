@@ -183,8 +183,9 @@ private fun ChannelCard(
     onSelect: (Channel) -> Unit,
 ) {
     SectionCard(title = "访问通道") {
-        // MOCK 是「我的」页演练开关的专用通道，不作为登录选项出现
-        val channels = Channel.entries.filter { it != Channel.MOCK }
+        // 去抢课分支（2026-09-23）移除了 MOCK 通道：登录页这三个选项就是全部通道。
+        // 这里曾经有一行 `Channel.entries.filter { it != Channel.MOCK }`，随通道一起删掉了。
+        val channels = Channel.entries
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             channels.forEachIndexed { index, channel ->
                 SegmentedButton(

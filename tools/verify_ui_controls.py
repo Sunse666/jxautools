@@ -10,6 +10,8 @@ P1 做的是一批「不会编译报错、也不会被运行时自检发现」�
    `container = secondary` + `content = onSecondaryContainer` —— 浅色主题下两者相对亮度
    0.100 与 0.030，对比度约 1.9，深底写深字，实际读不出来。两个颜色各自都合法，
    Kotlin 编译器不管，`core/SelfTest.kt` 也看不到 UI 层源码。**只能静态查**。
+   （⚠️ 该页已在 2026-09-23 的「去抢课」分支整体移除，但**这条断言必须留下** ——
+   剩下的 4 处标签仍是同一类缺陷的现场。）
 2. **控件被改回去**。`TabRow` / 竖排 `RadioButton` / `Checkbox` 这些东西一旦有人再写回来，
    没有任何东西会拦他 —— 除非有一条断言写着「这几样现在是 0 处」。
 3. **两个本该分工的容器混用**（P2）。`SectionCard`（信息展示）与 `SettingsGroup`（设置项）
@@ -211,14 +213,16 @@ def check_status_tags():
                         f"实际 content={t}"
                     )
                 continue
-            # 局部变量（exam / rush 的 bg / fg）：要求同一个文件里有 `val (bg, fg) = ...`
+            # 局部变量（exam 的 bg / fg）：要求同一个文件里有 `val (bg, fg) = ...`
             # 解构，这样它们的配对就落进 §2 的 `to` 检查里。
             if not re.search(r"val\s*\(\s*%s\s*,\s*%s\s*\)\s*=" % (re.escape(c), re.escape(t)), src):
                 problems.append(
                     f"{rel(path)}:{line} container={c} / content={t} 无法证明是一套配对："
                     f"既不是 colorScheme 角色，也不是 `val ({c}, {t}) =` 解构出来的"
                 )
-    check("§1 StatusTag 调用处数（应覆盖全部 6 处标签）", total, 6)
+    # 4 处 = advisor / exam / grade / student。
+    # （2026-09-23 去抢课分支删掉了原来第 5、6 处 —— 它们在 rush / selection 两个页面里。）
+    check("§1 StatusTag 调用处数（应覆盖全部 4 处标签）", total, 4)
     check("§1 StatusTag 容器色/内容色全部成套", problems, [])
 
 
@@ -239,9 +243,12 @@ def check_to_pairs():
                     problems.append(
                         f"{rel(path)}:{i} `{a} to {b}` 配对错：{a} 应配 {ROLE_PAIRS.get(a, '?')}"
                     )
-    # 期望值 6 = exam 2 条 + rush 4 条。低于这个数说明扫描失效（而不是代码变好），
-    # 所以这里用 >= 而不是 ==：以后新增配对不该让脚本红。
-    check("§2 扫描到 `容器色 to 内容色` 配对数（≥6，防扫描失效）", found >= 6, True)
+    # 期望值 2 = exam 的 `errorContainer to onErrorContainer` +
+    # `secondaryContainer to onSecondaryContainer`（就是 §1 里那两处 bg/fg 解构）。
+    # ⚠️ 2026-09-23 去抢课分支把原值从 6 降到 2：另外 4 条在 rush / selection 两页里，随页面一起删了。
+    # 这是**目标态真的变了**，不是为了让脚本变绿而放水 —— 阈值的作用只是「低于它说明扫描失效了」，
+    # 2 仍然能拦住这个（把 §1 的解构删掉、或正则写坏，都会立刻跌到 0）。
+    check("§2 扫描到 `容器色 to 内容色` 配对数（≥2，防扫描失效）", found >= 2, True)
     check("§2 所有 `to` 配对都成套", problems, [])
 
 
@@ -251,43 +258,50 @@ def count_calls(name):
 
 
 def check_controls():
-    # 这三样是 P1 明确要清掉的写法。为 0 才是目标态。
+    # 这几样是 P1 明确要清掉的写法。为 0 才是目标态。
     check("§3 `TabRow(` 残留（目标 0）", count_calls("TabRow"), 0)
     check("§3 `RadioButton(` 残留（目标 0）", count_calls("RadioButton"), 0)
     check("§3 `Checkbox(` 残留（目标 0）", count_calls("Checkbox"), 0)
+    # `PrimaryTabRow` 原本是选课页的「课程 / 抢课任务」内层切换 —— 唯一使用处。
+    # 2026-09-23 去抢课分支删掉该页后，全应用不再有任何内层 Tab 切换，所以目标态从 1 变成 0。
+    # ⚠️ 留这条断言（而不是删掉）是为了：将来谁要再引入内层 Tab，必须显式改这一行，
+    # 顺便被逼着回答「为什么不用 SegmentedButton / 底部导航」。
+    check("§3 `PrimaryTabRow(` 处数（选课页下线后应为 0）", count_calls("PrimaryTabRow"), 0)
 
-    # 这三样是替代品，数量不足说明改动被回退了。
-    check("§3 `PrimaryTabRow(` 处数（选课页内层切换）", count_calls("PrimaryTabRow"), 1)
+    # 这几样是替代品，数量不足说明改动被回退了。
     check("§3 `Switch(` 处数（记住密码 + 隐私显示完整）", count_calls("Switch"), 2)
     check("§3 `SegmentedButton(` 处数（通道 + 配色模式 + 字号 + 字族）",
           count_calls("SegmentedButton"), 4)
 
-    # 底部导航四个图标必须成对（outlined 未选中 / filled 选中）。
+    # 底部导航三个图标必须成对（outlined 未选中 / filled 选中）。
+    # `AddCircle`（选课）随该 Tab 一起下线，见 `AppRoot.kt` 的 `Tab` 枚举。
     app_root = SOURCES.get(os.path.join(UI, "AppRoot.kt"))
     if app_root is None:
         check("§3 AppRoot.kt 存在", False, True)
         return
     missing = []
-    for icon in ("DateRange", "AddCircle", "Star", "Person"):
+    for icon in ("DateRange", "Star", "Person"):
         if f"Icons.Outlined.{icon}" not in app_root:
             missing.append(f"缺 Icons.Outlined.{icon}")
         if f"Icons.Filled.{icon}" not in app_root:
             missing.append(f"缺 Icons.Filled.{icon}")
-    check("§3 底部导航 4 项图标 outlined/filled 成对", missing, [])
+    check("§3 底部导航 3 项图标 outlined/filled 成对", missing, [])
     check("§3 导航栏按选中态切图标（而不是只换颜色）",
           ("tab.selectedIcon" in app_root and "selected == index" in app_root), True)
 
 
 # ---------------------------------------------------------------- §4 写死的圆角
 def check_shapes():
-    """6 处标签的 4dp 圆角必须来自 shapes 主题，不许再写死。
+    """4 处标签的 4dp 圆角必须来自 shapes 主题，不许再写死。
 
-    ⚠️ 这个检查只覆盖「曾经是标签」的那 6 个文件里的 4dp 写法。
+    ⚠️ 这个检查只覆盖「曾经是标签」的那几个文件里的 4dp 写法。
     `plan` / `profile` 里还有几个 7/10/14dp 的一次性形状，那是刻意的，不在本检查范围。
+    2026-09-23 去抢课分支把名单从 6 个降到 4 个：`rush/RushScreen.kt` 与
+    `selection/SelectionScreen.kt` 已删除，留在这里只会报「文件不存在」。
     """
     problems = []
-    for name in ("exam/ExamScreen.kt", "rush/RushScreen.kt", "selection/SelectionScreen.kt",
-                 "student/StudentScreen.kt", "grade/GradeScreen.kt", "advisor/AdvisorScreen.kt"):
+    for name in ("exam/ExamScreen.kt", "student/StudentScreen.kt",
+                 "grade/GradeScreen.kt", "advisor/AdvisorScreen.kt"):
         path = os.path.join(UI, *name.split("/"))
         src = SOURCES.get(path)
         if src is None:
@@ -295,7 +309,7 @@ def check_shapes():
             continue
         if "RoundedCornerShape(4.dp)" in src:
             problems.append(f"{name} 又出现了写死的 RoundedCornerShape(4.dp)")
-    check("§4 6 处标签不再写死 4dp 圆角", problems, [])
+    check("§4 4 处标签不再写死 4dp 圆角", problems, [])
     check("§4 StatusTag 用 shapes.extraSmall",
           "MaterialTheme.shapes.extraSmall" in
           SOURCES.get(os.path.join(UI, "profile", "DetailParts.kt"), ""), True)
@@ -396,13 +410,12 @@ def check_top_bars():
     """P3：加了 M3 顶栏，且**课表页刻意不加**（用户拍板，大纲 §1.1 A3 选项 (a)）。
 
     这一节里最要紧的一条是「课表页与 AppRoot 不许出现顶栏」：
-    `AppRoot` 一旦有了统一的 `topBar` 槽，四个 Tab 会一起加上顶栏，
+    `AppRoot` 一旦有了统一的 `topBar` 槽，几个 Tab 会一起加上顶栏，
     而课表页要竖着滚 11 节、高度是它的命根子 —— 但**加了也能编译、界面也不崩**，
     只是课表矮了 64dp。这种「设计决定被无声推翻」正是本脚本要拦的东西。
     """
     bars = SOURCES.get(os.path.join(UI, "AppBars.kt"), "")
     grade = SOURCES.get(os.path.join(UI, "grade", "GradeScreen.kt"), "")
-    selection = SOURCES.get(os.path.join(UI, "selection", "SelectionScreen.kt"), "")
     profile = SOURCES.get(os.path.join(UI, "profile", "ProfileScreen.kt"), "")
     timetable = SOURCES.get(os.path.join(UI, "timetable", "TimetableScreen.kt"), "")
     app_root = SOURCES.get(os.path.join(UI, "AppRoot.kt"), "")
@@ -419,19 +432,19 @@ def check_top_bars():
     check("§6 裸 `TopAppBar(` 只有一处，且在 AppBars.kt",
           bare, [rel(os.path.join(UI, "AppBars.kt"))])
 
-    # 调用点 4 处：成绩 / 选课 / 我的（三个主页 Hub）+ DetailScaffold（子页外壳）。
+    # 调用点 3 处：成绩 / 我的（两个主页 Hub）+ DetailScaffold（子页外壳）。
+    # ⚠️ 2026-09-23 去抢课分支把原值从 4 降到 3：第 4 处是 `SelectionScreen` 的顶栏，随页面删除。
     # 将来真要在别处加一条顶栏，就把这个数改掉并写清是哪一处 —— 刻意的摩擦。
     call_sites = [(rel(p), line) for p, src in SOURCES.items() for line, _ in find_calls(src, "JxauTopBar")]
-    check("§6 JxauTopBar 调用点 4 处", len(call_sites), 4)
+    check("§6 JxauTopBar 调用点 3 处", len(call_sites), 3)
 
     # 标题串页是纯静默缺陷：复制一页改标题时最容易漏掉，而界面上要连点两个 Tab 才能发现。
     want_titles = (
         ("grade/GradeScreen.kt", grade, 'JxauTopBar(title = "成绩"'),
-        ("selection/SelectionScreen.kt", selection, 'JxauTopBar(title = "选课"'),
         ("profile/ProfileScreen.kt", profile, 'JxauTopBar(title = "我的"'),
     )
     wrong_title = [name for name, src, want in want_titles if want not in strip_comments(src)]
-    check("§6 三个主页顶栏标题分别是 成绩 / 选课 / 我的（防复制粘贴串页）", wrong_title, [])
+    check("§6 两个主页顶栏标题分别是 成绩 / 我的（防复制粘贴串页）", wrong_title, [])
 
     # ---- 选项 (a) 的护栏：课表页与 AppRoot 不许有顶栏 ----
     leaked = [n for n, src in (("timetable/TimetableScreen.kt", timetable), ("AppRoot.kt", app_root))
@@ -457,10 +470,9 @@ def check_top_bars():
     check("§6 折叠接线 helper 里真的调了 nestedScroll",
           "nestedScroll(behavior.nestedScrollConnection)" in strip_comments(bars), True)
     wired = [name for name, src in (("grade/GradeScreen.kt", grade),
-                                    ("selection/SelectionScreen.kt", selection),
                                     ("profile/ProfileScreen.kt", profile))
              if "jxauTopBarScroll(barBehavior)" not in strip_comments(src)]
-    check("§6 三个主页都把折叠接到了页面根容器", wired, [])
+    check("§6 两个主页都把折叠接到了页面根容器", wired, [])
 
     # ---- 子页外壳：换成 JxauTopBar，但**不折叠**（返回按钮不该滑走）----
     detail = function_body(profile, "internal fun DetailScaffold(")
@@ -472,9 +484,10 @@ def check_top_bars():
           ("KeyboardArrowLeft" in detail and 'contentDescription = "返回"' in detail), True)
     check("§6 DetailScaffold 顶栏固定不动（返回按钮不该滑出屏幕）", "scrollBehavior" in detail, False)
 
-    # ---- 子页外壳的调用点：12 个子页都还在。少一个 = 某个子页没了标题栏与返回按钮 ----
-    check("§6 DetailScaffold 调用点仍有 12 处",
-          sum(len(find_calls(src, "DetailScaffold")) for src in SOURCES.values()), 12)
+    # ---- 子页外壳的调用点：11 个子页都还在。少一个 = 某个子页没了标题栏与返回按钮 ----
+    # ⚠️ 2026-09-23 去抢课分支把原值从 12 降到 11（`SelectionScreen` 是第 12 个调用点）。
+    check("§6 DetailScaffold 调用点仍有 11 处",
+          sum(len(find_calls(src, "DetailScaffold")) for src in SOURCES.values()), 11)
 
     # ---- 实验 API 的 opt-in 收紧到函数，不许用 @file:OptIn 把整页盖住 ----
     # ⚠️ 必须 `strip_comments`：本文件与 AppBars.kt 的注释里都写了「不用 `@file:OptIn`」，

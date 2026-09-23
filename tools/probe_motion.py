@@ -42,10 +42,10 @@ MUTATIONS = [
      'key = null',
      "成绩列表去掉 key —— motionItem() 从此完全没有效果，而界面看不出来"),
 
-    ("selection/SelectionScreen.kt",
-     "items(state.courses, key = { it.classNo })",
-     "items(state.courses)",
-     "选课列表去掉 key"),
+    # ⚠️ 这里原本还有一条「`selection/SelectionScreen.kt` 的列表去掉 key」。
+    # 2026-09-23 去抢课分支删掉该页后，全应用只剩 `GradeScreen` 一处 `motionItem()`，
+    # 而它已经被上面第一条变异覆盖（`key = null` 同样触发 §5）。
+    # **防御本身仍在被探针打** → 删掉重复目标，而不是随便找个别处凑数。
 
     ("AppRoot.kt",
      "val tabStates = rememberSaveableStateHolder()",
@@ -92,10 +92,13 @@ MUTATIONS = [
      "import androidx.compose.foundation.lazy.LazyColumn",
      "成绩页绕过 Motion.kt 直接用 AnimatedContent"),
 
-    ("selection/SelectionScreen.kt",
+    # ⚠️ 原本打在 `selection/SelectionScreen.kt`（选课两半的 forward 规则）。该页删除后改指向
+    # `AppRoot.kt` 的 Tab 切换 —— 那里同样是一个真实调用点，删掉 `forward` 就是「返回时方向是反的」。
+    # 锚点取的是 ProfileScreen 那条**多行** forward 之外的一行式写法（全仓仅此一处，唯一性由探针自证）。
+    ("AppRoot.kt",
      "forward = { from, to -> to.ordinal > from.ordinal },\n",
      "",
-     "选课两半没给 forward 规则"),
+     "主 Tab 切换没给 forward 规则（返回时动画方向反了）"),
 
     ("Motion.kt",
      "    val Exit = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)",

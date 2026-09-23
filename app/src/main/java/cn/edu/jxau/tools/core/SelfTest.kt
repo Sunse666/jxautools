@@ -4,9 +4,7 @@ import cn.edu.jxau.tools.data.SessionValidation
 import cn.edu.jxau.tools.data.export.ExamIcs
 import cn.edu.jxau.tools.data.export.IcsWriter
 import cn.edu.jxau.tools.data.model.AdvisorPlanTest
-import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.GradeStats
-import cn.edu.jxau.tools.data.model.RushPolicy
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
@@ -71,9 +69,7 @@ object SelfTest {
         report("周次锚点存取", TermAnchor.selfTest())
         report("课表格子归纳", TimetableGrid.selfTest())
         report("成绩统计口径", GradeStats.selfTest())
-        report("选课容量与汇总口径", CourseClass.selfTest())
         report("会话失效判定", SessionValidation.selfTest())
-        report("抢课回执决策", RushPolicy.selfTest())
         report("外观与课表尺寸偏好", TimetableSizeSpec.selfTest())
         report("课程块配色", CoursePalette.selfTest())
         report("主题色派生", ColorThemeSpec.selfTest())

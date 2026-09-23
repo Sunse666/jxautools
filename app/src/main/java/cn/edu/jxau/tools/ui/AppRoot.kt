@@ -3,11 +3,9 @@ package cn.edu.jxau.tools.ui
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.AddCircle
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Star
@@ -31,7 +29,6 @@ import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.ui.grade.GradeScreen
 import cn.edu.jxau.tools.ui.login.LoginScreen
 import cn.edu.jxau.tools.ui.profile.ProfileScreen
-import cn.edu.jxau.tools.ui.selection.SelectionScreen
 import cn.edu.jxau.tools.ui.timetable.TimetableScreen
 
 /**
@@ -43,7 +40,7 @@ import cn.edu.jxau.tools.ui.timetable.TimetableScreen
  *
  * ## 为什么暂时不用 navigation-compose
  * M1 只有两个 Tab 加一个底部弹窗，`when(tab)` 就够了，引入导航库属于为将来买单。
- * 等到抢课流程（课程列表 → 选课参数 → 提交确认）真的需要回退栈时再引入——
+ * 将来真出现需要回退栈的流程（多级下钻、深链接）时再引入 ——
  * 那时它才有明确的职责，而不是现在先摆着。
  *
  * ## 门禁切换用「状态互换」而不是滑动
@@ -68,11 +65,11 @@ fun AppRoot() {
 /**
  * 底部导航。
  *
- * ⚠️ **选课与抢课合成一项**（2026-09-21 调整）：两者本来就是一件事的两半 ——
- * 课程行上的「抢」按钮直接产出抢课任务，拆成两个 Tab 只会让人在两个页面之间来回跳。
- * 现在「选课」内部再分「课程 / 抢课任务」两半，见 [SelectionScreen]。
+ * ⚠️ **本分支（去抢课精简版）只有 3 项**（2026-09-23 起）：课表 / 成绩 / 我的。
+ * Pro 版多一项「选课」（内部再分「课程 / 抢课任务」两半）；本分支把选课、抢课、mock 演练
+ * 整体移除，理由与判据见 `docs/改名与去抢课分支实施大纲.md`。
  *
- * 剩下的 4 项互不重叠：时间安排 / 操作 / 结果 / 设置。
+ * 剩下的 3 项互不重叠：时间安排 / 结果 / 设置。
  *
  * 图标**成对**给出（未选中 outlined / 选中 filled）：这是 M3 导航栏的标准做法 ——
  * 选中态换的是形状（描边 → 实心）而不是只换颜色，色觉障碍用户也能看出选了哪一项。
@@ -84,7 +81,6 @@ private enum class Tab(
     val selectedIcon: ImageVector,
 ) {
     Timetable("课表", Icons.Outlined.DateRange, Icons.Filled.DateRange),
-    Selection("选课", Icons.Outlined.AddCircle, Icons.Filled.AddCircle),
     Grade("成绩", Icons.Outlined.Star, Icons.Filled.Star),
     Profile("我的", Icons.Outlined.Person, Icons.Filled.Person),
 }
@@ -96,7 +92,7 @@ private fun MainShell() {
 
     // 每个 Tab 的状态各自留档。**这一行不是可选的**：
     // `AnimatedContent`（[MotionPager]）在过渡结束后会把上一个 Tab 移出组合树，
-    // 那上面的 `rememberSaveable`（列表滚动位置、抢课任务展开状态）随之消失 ——
+    // 那上面的 `rememberSaveable`（列表滚动位置、筛选状态）随之消失 ——
     // 表现是「切走再切回来，位置回到顶部」。加了动画反而比不加更差，
     // 而每一处看起来都正常（不报错、不崩溃）。靠 `verify_motion.py` 守着。
     val tabStates = rememberSaveableStateHolder()
@@ -139,7 +135,6 @@ private fun MainShell() {
             tabStates.SaveableStateProvider(tab.name) {
                 when (tab) {
                     Tab.Timetable -> TimetableScreen()
-                    Tab.Selection -> SelectionScreen()
                     Tab.Grade -> GradeScreen()
                     Tab.Profile -> ProfileScreen()
                 }

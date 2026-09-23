@@ -43,8 +43,8 @@ internal fun fullDate(date: LocalDate): String =
  * 样式统一由这个文件说了算。
  *
  * 都是 `internal`，用它的有：`ui.profile` 及其子页（外观主题、字体、周次校准、考试、学籍、
- * 导师、学期规划），以及 `ui.grade` / `ui.selection` / `ui.rush` 这几个页（它们只是主 Tab
- * 不同，展示零件没必要各写一份）。
+ * 导师、学期规划）以及 `ui.grade`（成绩页）—— 它们只是主 Tab 不同，展示零件没必要各写一份。
+ * （Pro 版另有 `ui.selection` / `ui.rush` 两个页也用这里的东西，本分支已随抢课移除。）
  *
  * ## 两种容器的分工（改页面前先读这一条）
  * - **[SectionCard]：信息展示。** 内容是「读回来的事实」——学籍字段、会话状态、统计数字、
@@ -133,7 +133,8 @@ internal fun InfoRow(label: String, value: String) {
  *
  * ⚠️ [container] 与 [content] 必须是**同一套配对**（`secondaryContainer` 配
  * `onSecondaryContainer`，不能配 `onSecondary`）。混搭出来的是深底深字或浅底浅字，
- * 而这类错误在编译器与自检里都不报 —— 见 `SelectionScreen` 里「已选」那一处的注释。
+ * 而这类错误在编译器与自检里都不报 —— 这正是 `tools/verify_ui_controls.py` §1/§2
+ * 存在的理由（原生事故现场是 Pro 版 `SelectionScreen` 里的「已选」标签，已随抢课移除）。
  */
 @Composable
 internal fun StatusTag(

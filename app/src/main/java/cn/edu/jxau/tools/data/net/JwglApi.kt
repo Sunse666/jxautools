@@ -2,20 +2,16 @@ package cn.edu.jxau.tools.data.net
 
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.model.AdvisorRecord
-import cn.edu.jxau.tools.data.model.CourseClass
 import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.ExamItem
 import cn.edu.jxau.tools.data.model.GradeItem
 import cn.edu.jxau.tools.data.model.PlanBook
 import cn.edu.jxau.tools.data.model.PlanItem
 import cn.edu.jxau.tools.data.model.ProfileGroup
-import cn.edu.jxau.tools.data.model.SelectionScope
 import cn.edu.jxau.tools.data.model.ServerDate
 import cn.edu.jxau.tools.data.model.Term
 import cn.edu.jxau.tools.data.model.TermPlan
-import cn.edu.jxau.tools.data.model.TicketCheckState
 import cn.edu.jxau.tools.data.model.WeekParser
-import cn.edu.jxau.tools.data.model.WriteResult
 import cn.edu.jxau.tools.data.model.XueJiChange
 import cn.edu.jxau.tools.data.model.XueJiChangeSchema
 import cn.edu.jxau.tools.data.model.XueJiSchema
@@ -118,153 +114,6 @@ class JwglApi(
         val body = postJson(EP_TIMETABLE, listOf("xq" to term, "start" to "0", "limit" to "1000"))
             ?: return null
         return body["Data"].asRows().mapNotNull { it.toCourseSlot() }
-    }
-
-    /**
-     * 按选课范围查询教学班。**「已选课程」和「可选课程」是同一个接口**，
-     * 只是 `xklb` 不同，所以只需要这一个函数。
-     *
-     * [keyword] 走的是 `Jxb` 参数（不是 `KeyWord`）。依据是页面 JS 的 `LoadData()`：
-     * 它从名为 `KeyWord` 的输入框取值，却赋给了 `myjxb`，最终拼进 `Jxb`。
-     * 照抄这个行为——按 `KeyWord` 传会**静默查不到东西**（服务端认不出这个参数）。
-     *
-     * [college] 走 `Kkdw`，取值来自 `GetDepartmentlist`。
-     *
-     * 失败返回 null。
-     */
-    suspend fun fetchCourses(
-        scope: SelectionScope,
-        keyword: String = "",
-        college: String = "",
-    ): List<CourseClass>? {
-        val extra = buildList {
-            add("xklb" to scope.xklb)
-            if (keyword.isNotBlank()) add("Jxb" to keyword.trim())
-            if (college.isNotBlank()) add("Kkdw" to college.trim())
-        }
-        // pageSize 给 500：实测最大的一类是公选课 130 条，留足余量
-        val rows = fetchAllRows(EP_XK_LIST, extra, pageSize = 500) ?: return null
-        val courses = rows.mapNotNull { it.toCourseClass() }
-        // JxbBh 是选课/退选的唯一凭据。缺了它的行在界面上会变成一个点了没反应的按钮，
-        // 所以宁可丢掉也不能留在列表里——但必须在日志里说清楚丢了几条。
-        val dropped = rows.size - courses.size
-        if (dropped > 0) {
-            JxauLog.e("有 $dropped 条教学班缺少 JxbBh，无法参与选退课，已从列表中剔除（xklb=${scope.xklb}）")
-        }
-        return courses
-    }
-
-    /**
-     * 课程类别树（左侧那棵树的节点）。
-     *
-     * ⚠️ 实测抢课窗口关闭期间返回 `[]`——该生当下没有任何选课批次。
-     * 节点 JSON 的**具体形态没有样本**，所以这里只做**宽容提取**：
-     * 递归找出所有带文本字段的对象。不认识的形态不会抛异常，最坏情况是返回空，
-     * 由调用方回退到 [SelectionScope.BUILTIN]。
-     *
-     * 返回 null 表示请求失败（与「树为空」区分开）。
-     */
-    suspend fun fetchCourseTree(): List<SelectionScope>? {
-        // 走 postElement 而不是 postJson：这个接口正常返回的就是**裸数组**，
-        // 用 postJson（只认对象）会把 `[]` 与 `[{...}]` 全打成「请求失败」。
-        val element = postElement(EP_KC_TREE, emptyList()) ?: return null
-        val nodes = mutableListOf<SelectionScope>()
-        collectTreeNodes(element, nodes)
-        return nodes.distinctBy { it.xklb }
-    }
-
-    /**
-     * 选课开放批次（`Getxkqq`）。
-     *
-     * 这是**最直接的窗口信号**：返回的 `Data` 就是「当前对你开放的选课批次」本身。
-     * 实测窗口关闭时 `{"Data":[],"Result":true,"totalCount":0}` —— 空数组 + 成功，
-     * 语义干净，不像 `GetGxkcTree` 那样需要旁证推断。
-     *
-     * ⚠️ 开放状态的样本还没拿到（窗口一直没开过），所以只敢用「非空 → 有批次」
-     * 这个方向；批次内的字段结构未知，这里只数行数，不解析内容。
-     * 等真实窗口开了再补字段，别臆造。
-     *
-     * 返回 null = 请求失败（与「空批次」区分开）。
-     */
-    suspend fun fetchXkBatches(): Int? {
-        val element = postElement(EP_XK_BATCHES, listOf("start" to "0", "limit" to "50")) ?: return null
-        return when (val obj = element as? JsonObject) {
-            null -> 0 // 裸数组形态：按行数算
-            else -> obj["Data"]?.let { (it as? JsonArray)?.size } ?: 0
-        }
-    }
-
-    /** 递归扫树节点。服务端可能给 `Data` 数组、`children` 嵌套，也可能直接给根对象 */
-    private fun collectTreeNodes(element: JsonElement?, out: MutableList<SelectionScope>) {
-        when (element) {
-            is JsonArray -> element.forEach { collectTreeNodes(it, out) }
-            is JsonObject -> {
-                val id = element.str("id") ?: element.str("Id") ?: element.str("Key")
-                val text = element.str("text") ?: element.str("Text")
-                    ?: element.str("Value") ?: element.str("name")
-                if (id != null && text != null) {
-                    out += SelectionScope(
-                        xklb = id,
-                        label = text,
-                        hint = "服务端课程类别",
-                        source = SelectionScope.Source.TREE,
-                    )
-                }
-                // 子节点：常见键名 children / Children / nodes
-                listOf("children", "Children", "nodes", "Nodes").forEach { key ->
-                    collectTreeNodes(element[key], out)
-                }
-            }
-            else -> Unit
-        }
-    }
-
-    /**
-     * 提交选课。对应页面 JS 的 `Apply()`。
-     *
-     * ⚠️ **三个参数里有两个极易传错**（照抄 JS 逐字核对过）：
-     * - `Xklb` 要传**行数据里的 `Xklb`**（`必修` / `任选` / `体育任选`），
-     *   **不是**查询用的那个 `xklb`（`已选课程` / `必修分组`）。两者同名不同义。
-     * - `pcid` 来自行数据的 `Xkpc`（选课批次），实测必修是 0、公选 186、体育 187。
-     */
-    suspend fun selectCourse(course: CourseClass): WriteResult = write(
-        tail = EP_XK_APPLY,
-        form = listOf(
-            "JxbBh" to course.classNo,
-            "Xklb" to course.selectCategory,
-            "pcid" to course.batchId.toString(),
-        ),
-        action = "选课",
-    )
-
-    /**
-     * 退选。对应页面 JS 的 `Del()`——**只传 `JxbBh` 一个参数**，
-     * 不需要类别也不需要批次（与选课不对称，别想当然补参数）。
-     */
-    suspend fun dropCourse(classNo: String): WriteResult = write(
-        tail = EP_XK_DROP,
-        form = listOf("JxbBh" to classNo),
-        action = "退选",
-    )
-
-    /** 写操作的公共外壳：把响应翻译成三态回执，并在日志里留全原文 */
-    private suspend fun write(
-        tail: String,
-        form: List<Pair<String, String>>,
-        action: String,
-    ): WriteResult {
-        val outcome = postRaw(tail, form)
-            ?: return WriteResult(delivered = false, ok = null)
-        val json = outcome.json
-            ?: return WriteResult(delivered = false, ok = null)
-        // Result 与 success 都在时以 Result 为准；都没有就是判不出来
-        val ok = json.bool("Result") ?: json.bool("success")
-        val message = json.str("Message").orEmpty()
-        JxauLog.i("$action 回执：ok=$ok message=\"$message\" 正文=${outcome.body.take(200)}")
-        if (ok == null) {
-            JxauLog.w("$action 回执里既没有 Result 也没有 success，无法判断成功与否。请到教务系统页面确认")
-        }
-        return WriteResult(delivered = true, ok = ok, message = message)
     }
 
     /** 考试安排。[term] 形如 `20261`。失败返回 null（调用方据此放弃周次锚点推算） */
@@ -439,25 +288,6 @@ class JwglApi(
         }
     }
 
-    /**
-     * 校验当前 guid 的会话票据是否有效。
-     *
-     * ⚠️ **它不是「选课窗口开关」**——这个接口先前被误读过，详见 [TicketCheckState] 的对照表。
-     * 它做的是「这个 guid 还有效吗」，返回 `Result:true` 且 `Message` 是 ST 原文。
-     *
-     * 与其它接口不同：路径里**不带** uuid，uuid 走 form 参数 `guid`（对照脚本 `_check_guid_status`）。
-     * 另外它**必须 POST**，GET 会拿到 HTTP 500。
-     */
-    suspend fun checkTicket(): TicketCheckState {
-        val url = profile.apiBase.trimEnd('/') + "/User/CheckGuid/" + vpnSuffix()
-        val referer = profile.apiBase.trimEnd('/') + "/Main/Index/" + uuid + vpnSuffix()
-        val body = postJsonAt(url, listOf("guid" to uuid), referer)?.json
-        return TicketCheckState(
-            valid = body?.bool("Result") ?: body?.bool("success") ?: false,
-            rawMessage = body?.str("Message").orEmpty(),
-        )
-    }
-
     // ---------- 底层请求 ----------
 
     /**
@@ -469,12 +299,9 @@ class JwglApi(
         refererTail: String = tail,
     ): JsonObject? = postJsonAt(urlOf(tail), form, refererOf(refererTail))?.json
 
-    /** 需要看到响应原文的场合（写操作）走这里 */
-    private suspend fun postRaw(
-        tail: String,
-        form: List<Pair<String, String>>,
-        refererTail: String = tail,
-    ): PostOutcome? = postJsonAt(urlOf(tail), form, refererOf(refererTail))
+    // 去抢课分支（2026-09-23）删掉了 `postRaw`：它唯一的调用方是选课的 `write()` 外壳
+    // （把响应原文翻译成「送达 / 未送达 × 成功 / 失败 / 判不出来」的三态回执）。
+    // 那套写操作随选课一起下线，`postRaw` 成了死代码。要看响应原文仍有 [PostOutcome.body]。
 
     /** 直接要 JSON 元素的场合（响应可能是裸数组，不能只认对象）走这里 */
     private suspend fun postElement(
@@ -653,33 +480,6 @@ class JwglApi(
             primitive.contentOrNull?.let { key to it }
         }.toMap()
 
-    /**
-     * `GetKcInfo` 的一行 → [CourseClass]。
-     *
-     * 缺 `JxbBh` 返回 null（调用方会剔除并告警）——它是选退课的唯一凭据，
-     * 留着只会造出一个点了没反应的按钮。
-     */
-    private fun JsonObject.toCourseClass(): CourseClass? {
-        val no = str("JxbBh") ?: return null
-        return CourseClass(
-            classNo = no,
-            className = str("Jxb").orEmpty(),
-            courseCategory = str("Kclb").orEmpty(),
-            // 开课查询给的是 RkLs，老版式给 Rkls，两种都认
-            teacher = str("RkLs") ?: str("Rkls").orEmpty(),
-            credit = dbl("Zxf") ?: 0.0,
-            selectCategory = str("Xklb").orEmpty(),
-            students = int("SkRs") ?: 0,
-            capacity = int("MaxRs") ?: 0,
-            vacancy = int("Xkrl") ?: 0,
-            timeText = str("Sksj").orEmpty(),
-            requirement = str("Xkyq").orEmpty(),
-            stateFlag = int("XkZt") ?: 0,
-            batchId = int("Xkpc") ?: 0,
-            college = str("Kkdw") ?: str("KkDw").orEmpty(),
-        )
-    }
-
     private fun JsonObject.toCourseSlot(): CourseSlot? {
         val id = int("ID") ?: return null
         val xingQiRaw = str("XingQi").orEmpty()
@@ -726,14 +526,6 @@ class JwglApi(
         // 路径尾巴（不含 uuid）。Referer 用同一路径，与浏览器一致。
         private const val EP_TERMS = "Common/BaseData/GetKsXq"
         private const val EP_TIMETABLE = "PaikeManage/KebiaoInfo/GetStudentKebiaoByXq"
-        private const val EP_XK_LIST = "KcManage/GxKcManage/GetKcInfo"
-        /** 选课提交。页面 JS `Apply()` 用的就是这条 */
-        private const val EP_XK_APPLY = "KcManage/GxKcManage/XkInfo"
-        /** 退选。页面 JS `Del()` 用的就是这条 */
-        private const val EP_XK_DROP = "KcManage/GxKcManage/DelXkinfo"
-        /** 左侧课程类别树 */
-        private const val EP_KC_TREE = "Common/BaseData/GetGxkcTree"
-        private const val EP_XK_BATCHES = "KcManage/GxKcManage/Getxkqq"
         private const val EP_EXAMS = "PaiKaoManage/KaoShiAnPaiChaXunManage/GetKaoShiInfo_Student"
         private const val EP_SCORES = "SystemManage/CJManage/GetXsCjByXh"
         private const val EP_XUEJI = "XueJiManage/XueJiManage/GetUserInfo"
@@ -747,7 +539,6 @@ class JwglApi(
 
         // 页面路径（仅用于 Referer）
         val PAGE_TIMETABLE = "PaikeManage/KebiaoInfo/GetStudentkebiao"
-        val PAGE_XK_LIST = "KcManage/GxkcManage/XKStudentList"
         val PAGE_EXAMS = "PaiKaoManage/KaoShiAnPaiChaXunManage/Ksapcx_Student"
         val PAGE_SCORES = "SystemManage/PersonalScoreLookFor/PersonalScoreLookFor"
         val PAGE_XUEJI = "XueJiManage/XueJiManage/ViewXueJiInfo"

@@ -20,7 +20,15 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "cn.edu.jxau.tools"
+        // ⚠️ **与 Pro 版（`cn.edu.jxau.tools`）故意不同** —— 去抢课精简版是**另一条安装链**。
+        // 改这一行的代价要说清楚：它决定「谁能覆盖安装谁」。
+        //   · 同 id 才能覆盖升级（也必须同一把密钥签名）；换 id = 换了一个 App，两版可同机共存，
+        //     但**精简版的用户想换到 Pro 版必须卸载重装**（连带清空会话与设置）。
+        //   · 2026-09-23 拍板选共存：精简版是给同学的分发版、Pro 是自用全功能版。
+        // namespace 不变（= 源码包名 `cn.edu.jxau.tools`，只影响 R 类与 BuildConfig 的包名）。
+        // `AndroidManifest.xml` 里 FileProvider 用的是 `${applicationId}.fileprovider` 占位符，
+        // 会自动跟着这里走，不需要手改。
+        applicationId = "cn.edu.jxau.tools.lite"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

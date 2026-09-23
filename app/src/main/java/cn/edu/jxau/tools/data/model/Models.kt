@@ -6,14 +6,13 @@ package cn.edu.jxau.tools.data.model
  * - [AUTO]：启动时探测 jwgl 直连可达性，可达走 [DIRECT]，否则回落 [WEBVPN]
  * - [DIRECT]：直接访问 jwgl.jxau.edu.cn（仅校园网内可达）
  * - [WEBVPN]：所有请求经 webvpnnew.jxau.edu.cn 域名重写
- * - [MOCK]：本机 mock 教务服务端（`tools/mock_jwgl.py`）。**只用于演练**，
- *   绝不出现在正式通道选择里；进入方式是「我的」页的演练开关，退出即恢复原会话。
+ * ⚠️ **去抢课分支已移除 [MOCK] 取值**（本机 mock 教务服务端 `tools/mock_jwgl.py`）：
+ * 它唯一的消费方是抢课引擎演练，功能一起下线后这个通道没有存在理由。
  */
 enum class Channel(val label: String, val shortLabel: String) {
     AUTO("自动（探测后选择）", "自动"),
     DIRECT("直连 jwgl.jxau.edu.cn", "直连"),
     WEBVPN("WebVPN 重写通道", "WebVPN"),
-    MOCK("本地演练（Mock 服务端）", "演练"),
 }
 
 /**

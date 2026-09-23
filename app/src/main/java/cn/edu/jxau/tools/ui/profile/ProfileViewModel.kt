@@ -14,7 +14,6 @@ import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.net.SiteProfiles
-import cn.edu.jxau.tools.service.RushScheduler
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.time.LocalDate
@@ -65,7 +64,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
             val outcome = repo.validate(session, profile)
             JxauLog.i("手动校验：${if (outcome.valid) "有效" else "无效"}（${outcome.detail}）")
             if (outcome.valid && outcome.cookie.isNotBlank()) {
-                // 校验走了一次网络往返，期间会话可能已被换掉（切演练/退出登录/后台续期），
+                // 校验走了一次网络往返，期间会话可能已被换掉（退出登录/重新登录/后台续期），
                 // 只允许把新 Cookie 写回「还是原来那个会话」的时候
                 if (repo.session.value === session) {
                     repo.adopt(session.copy(cookie = outcome.cookie, savedAt = System.currentTimeMillis()))
@@ -81,26 +80,7 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
      */
     fun logout() {
         JxauLog.i("用户主动退出登录")
-        // 待触发的抢课闹钟一起撤掉：没有会话时它触发只会白跑一趟，
-        // 而且「退出登录后还会自己开始抢课」这件事本身就是错的。
-        // 撤掉会同时清掉落盘的时刻（见 RushScheduler.cancel），所以重启后也不会被补回来。
-        RushScheduler.cancel(getApplication())
         repo.clear()
-    }
-
-    // ---------- 本地演练（Mock）模式 ----------
-
-    /** 是否处于演练模式 */
-    fun isMockActive(): Boolean = repo.isMockActive()
-
-    /** 进入演练：备份真实会话，切到 mock 通道（需要本机跑着 tools/mock_jwgl.py） */
-    fun enterMock() {
-        viewModelScope.launch { repo.enterMockMode() }
-    }
-
-    /** 退出演练：恢复真实会话 */
-    fun exitMock() {
-        viewModelScope.launch { repo.exitMockMode() }
     }
 
     // ---------- 界面偏好 ----------

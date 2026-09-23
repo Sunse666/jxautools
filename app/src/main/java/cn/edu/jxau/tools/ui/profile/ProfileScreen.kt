@@ -35,7 +35,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -196,8 +195,9 @@ private enum class ProfilePage(val title: String, val icon: ImageVector) {
     WeekAnchor("周次校准", Icons.Filled.Edit),
 
     // ---- 会话与维护 ----
+    // 去抢课分支（2026-09-23）删掉了 `Mock("本地演练", Icons.Filled.PlayArrow)`：
+    // 本地演练的唯一用途是「在选课窗口外验证抢课引擎」，抢课下线后它没有验证对象。
     Session("会话与保活", Icons.Filled.Person),
-    Mock("本地演练", Icons.Filled.PlayArrow),
     Diagnostics("诊断与日志", Icons.Filled.Build),
 
     // ---- 其他 ----
@@ -222,7 +222,6 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
     val hasTgt by repo.hasTgtFlow.collectAsState()
     val prefs by viewModel.settings.prefs.collectAsState()
     val systemDark = isSystemInDarkTheme()
-    val mockActive = session?.channel == Channel.MOCK
 
     var confirmLogout by remember { mutableStateOf(false) }
 
@@ -325,12 +324,6 @@ private fun ProfileHub(viewModel: ProfileViewModel, onOpen: (ProfilePage) -> Uni
                     showDivider = false,
                 )
                 NavRow(
-                    page = ProfilePage.Mock,
-                    title = "本地演练",
-                    summary = if (mockActive) "演练中：请求打向本机 mock 服务端" else "未开启（选课窗口外验证抢课用）",
-                    onOpen = onOpen,
-                )
-                NavRow(
                     page = ProfilePage.Diagnostics,
                     title = "诊断与日志",
                     summary = "纯逻辑自检 · 运行日志",
@@ -391,7 +384,6 @@ private fun ProfileSubPage(page: ProfilePage, viewModel: ProfileViewModel, onBac
         ProfilePage.Timetable -> TimetableSizePage(viewModel, onBack)
         ProfilePage.WeekAnchor -> WeekAnchorPage(viewModel, onBack)
         ProfilePage.Session -> SessionPage(viewModel, onBack)
-        ProfilePage.Mock -> MockPage(viewModel, onBack)
         ProfilePage.Diagnostics -> DiagnosticsPage(onBack)
         ProfilePage.About -> AboutPage(onBack)
     }
@@ -1173,36 +1165,13 @@ private fun SessionPage(viewModel: ProfileViewModel, onBack: () -> Unit) {
     }
 }
 
-// ---------- 子页：本地演练 ----------
-
-@Composable
-private fun MockPage(viewModel: ProfileViewModel, onBack: () -> Unit) {
-    val session by viewModel.repo.session.collectAsState()
-    val mockActive = session?.channel == Channel.MOCK
-
-    DetailScaffold("本地演练", onBack) {
-        SectionCard("状态") {
-            InfoRow("当前", if (mockActive) "演练中" else "未开启")
-            InfoRow("请求目标", if (mockActive) "本机 mock 服务端（10.0.2.2:8765）" else "真实教务系统")
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (mockActive) {
-                    "所有请求打向本机 mock 服务端，真实会话已备份。退出演练即恢复。"
-                } else {
-                    "演练模式会把请求切到本机 mock 教务服务端（tools/mock_jwgl.py），" +
-                        "用于在选课窗口外验证抢课引擎。真实会话会先备份，退出即恢复。"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { viewModel.enterMock() }, enabled = !mockActive) { Text("进入演练") }
-                OutlinedButton(onClick = { viewModel.exitMock() }, enabled = mockActive) { Text("退出演练") }
-            }
-        }
-    }
-}
+// ---------- 子页：本地演练（去抢课分支已移除） ----------
+//
+// 2026-09-23 删掉了 `MockPage`：它做的是「把请求切到本机 mock 服务端
+// （`tools/mock_jwgl.py`，`10.0.2.2:8765`）以便在选课窗口外验证抢课引擎」。
+// 抢课下线后演练没有验证对象；而且那条入口在真机上是典型的「点了连不上、
+// 还会把真实会话 `backupSessionForMock()` 切走（退出演练才恢复）」的坑。
+// 删除它顺带消掉了 `docs/发布说明.md` §5.1「分发前必办」里的一项。
 
 // ---------- 子页：诊断与日志 ----------
 
@@ -1216,8 +1185,8 @@ private fun DiagnosticsPage(onBack: () -> Unit) {
             Text(
                 "以下纯计算逻辑每次启动都会自动跑一遍，失败项以 [E] 写进日志：" +
                     "密码 RSA 加密、周次解析、教学周推算、课表格子归纳、成绩统计口径、" +
-                    "选课容量与汇总、会话失效判定、抢课回执决策、外观与课表尺寸偏好、" +
-                    "课程块配色、主题色派生、课表空格底纹、日历写出与考试时间解析、" +
+                    "会话失效判定、外观与课表尺寸偏好、课程块配色、主题色派生、" +
+                    "课表空格底纹、日历写出与考试时间解析、" +
                     "学籍档案字段白名单与隐私遮蔽、导师与学期规划。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1254,16 +1223,19 @@ private fun DiagnosticsPage(onBack: () -> Unit) {
 private fun AboutPage(onBack: () -> Unit) {
     DetailScaffold("关于", onBack) {
         SectionCard("应用") {
+            // 应用名与包名两版不同：Pro 版是「江农工具箱Pro」/`cn.edu.jxau.tools`，
+            // 本分支（去抢课精简版）是「江农工具箱」/`cn.edu.jxau.tools.lite`。
             InfoRow("名称", "JXAU Tools / 江农工具箱")
             InfoRow("版本", APP_VERSION)
-            InfoRow("包名", "cn.edu.jxau.tools")
+            InfoRow("包名", "cn.edu.jxau.tools.lite")
             InfoRow("数据来源", "jwgl.jxau.edu.cn（教务系统）/ WebVPN 重写通道")
         }
 
         SectionCard("说明与免责") {
             Text(
                 "本应用为本校学生自用的教务系统客户端，仅代表个人访问自己的数据，不做服务端中转。" +
-                    "抢课等写操作请在开放窗口内自行确认结果；因使用产生的后果由使用者自负。",
+                    "本分支已移除选课 / 抢课等一切写操作，全部功能都是只读查询；" +
+                    "因使用产生的后果由使用者自负。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

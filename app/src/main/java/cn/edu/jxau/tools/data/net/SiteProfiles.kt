@@ -30,7 +30,7 @@ data class SiteProfile(
     val stService: String,
     /**
      * WebVPN 专用前置步：兑换教务会话**之前**，先拿一张 ST 交给网关换 vpn 票据，
-     * 这里填给这张 ST 的 service。空串 = 该通道无此前置步（直连/演练）。
+     * 这里填给这张 ST 的 service。空串 = 该通道无此前置步（直连）。
      */
     val vpnTicketService: String = "",
     /** WebVPN 专用前置步：网关消费 ST 的地址，`{ST}` 占位。空串 = 无。 */
@@ -113,35 +113,18 @@ object SiteProfiles {
     )
 
     /**
-     * 本地演练通道。指向 `tools/mock_jwgl.py`。
+     * 去抢课分支（2026-09-23）移除了原 MOCK 通道 profile（本机 mock 教务服务端
+     * `tools/mock_jwgl.py`，地址 `http://10.0.2.2:8765`）。
      *
-     * 地址用 `10.0.2.2:8765`（MuMu/AVD 的 NAT 网关 = 开发机本机），**不依赖 `adb reverse`**——
-     * 实测 reverse 会在 adb daemon 每次重连时被清掉，演练跑到一半断连极难排查。
-     *
-     * **只用于抢课引擎演练**：不经过真实 CAS（会话由 [SessionRepository.enterMockMode] 直接灌入，
-     * TGT 是 mock 服务端认的假票据，expire 场景的「TGT→ST→新会话」自愈链路可以完整演练）。
+     * 原文里值得留下的两条经验，避免下次重蹈：
+     *   ① 用 `10.0.2.2:8765`（MuMu/AVD 的 NAT 网关 = 开发机本机），**不要用 `adb reverse`** ——
+     *      实测 reverse 会在 adb daemon 每次重连时被清掉，演练跑到一半断连极难排查；
+     *   ② 那个 profile 是分发前的一个「必办项」：它是设置页里的正式入口，
+     *      真机上点进去既连不上、又会把真实会话备份切走 —— 同学误点会以为 App 坏了。
+     *      删掉抢课（以及依赖它的 mock 演练）正好把这个风险从根上消掉。
      */
-    val MOCK = SiteProfile(
-        channel = Channel.MOCK,
-        label = "本地演练（Mock 服务端）",
-        casLoginUrl = "http://10.0.2.2:8765/mock-cas/login",
-        casKaptchaUrl = "http://10.0.2.2:8765/mock-cas/kaptcha",
-        casTicketsUrl = "http://10.0.2.2:8765/mock-cas/v1/tickets",
-        serviceForLogin = "http://10.0.2.2:8765/mock-service",
-        tgtToStUrlTemplate = "http://10.0.2.2:8765/mock-cas/v1/tickets/{TGT}",
-        stService = "http://10.0.2.2:8765/mock-service",
-        stRedeemUrlTemplate = "http://10.0.2.2:8765/mock-service?ticket={ST}",
-        mainIndexUrlTemplate = "http://10.0.2.2:8765/Main/Index/{UUID}",
-        sessionCookieName = "ASP.NET_SessionId",
-        sessionHost = "10.0.2.2",
-        apiBase = "http://10.0.2.2:8765",
-        protocolLoginVerified = true,
-        note = "本地 mock；模拟器内 127.0.0.1 经 adb reverse 映射到开发机",
-    )
-
     fun of(channel: Channel): SiteProfile = when (channel) {
         Channel.WEBVPN -> WEBVPN
-        Channel.MOCK -> MOCK
         else -> DIRECT
     }
 
@@ -169,7 +152,6 @@ object SiteProfiles {
     fun resolve(choice: Channel): Channel = when (choice) {
         Channel.DIRECT -> Channel.DIRECT
         Channel.WEBVPN -> Channel.WEBVPN
-        Channel.MOCK -> Channel.MOCK
         Channel.AUTO -> {
             if (probeDirectReachable()) Channel.DIRECT else Channel.WEBVPN
         }

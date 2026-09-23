@@ -4,7 +4,7 @@
 
 ## 为什么必须有这个
 
-`verify_ui_controls.py` 报「15 项全 PASS」，只有两种可能：
+`verify_ui_controls.py` 报「37 项全 PASS」，只有两种可能：
 它真的查对了，或者它什么都没查。光看 PASS 分不出来 —— 所以逐个把源码改坏，
 断言它必须报 FAIL。**一条改不坏的检查等于没有检查。**
 
@@ -31,10 +31,13 @@ SCRATCH_CHECKER = os.path.join(ROOT, "tools", "out", "ui-check", "checker_mutate
 
 # (相对 ui 的文件, 原文, 换成, 说明) —— 原文必须**原样出现**（含缩进），否则直接报错而不是静默跳过。
 MUTATIONS = [
-    ("selection/SelectionScreen.kt",
-     "container = MaterialTheme.colorScheme.secondaryContainer",
-     "container = MaterialTheme.colorScheme.secondary",
-     "把「已选」的容器色改回 secondary（就是这个 bug 本身）"),
+    # ⚠️ 本条原本打在 `selection/SelectionScreen.kt` 的「已选」标签上（那个 bug 的发源处）。
+    # 2026-09-23 去抢课分支删掉了那个页面，**按纪律改指向现存的同类调用点**（student 的
+    # `surfaceVariant` 那处），而不是把变异删掉了事 —— 探针抓不住的防御就是多余的防御。
+    ("student/StudentScreen.kt",
+     "container = MaterialTheme.colorScheme.surfaceVariant,",
+     "container = MaterialTheme.colorScheme.surface,",
+     "把 surfaceVariant 标签的容器色换成 surface（浅底写浅字，就是这个 bug 本身）"),
 
     ("advisor/AdvisorScreen.kt",
      "content = MaterialTheme.colorScheme.onSecondaryContainer",
@@ -46,10 +49,14 @@ MUTATIONS = [
      "errorContainer to MaterialTheme.colorScheme.onSecondaryContainer",
      "exam 的 `to` 配对里补考色串到了 secondaryContainer"),
 
-    ("selection/SelectionScreen.kt",
-     "PrimaryTabRow(selectedTabIndex = current.ordinal)",
-     "TabRow(selectedTabIndex = current.ordinal)",
-     "把 PrimaryTabRow 退回老式 TabRow"),
+    # ⚠️ 本条原本是「把 `selection/SelectionScreen.kt` 里的 PrimaryTabRow 退回老式 TabRow」。
+    # 该页面删除后全应用已无内层 Tab，`PrimaryTabRow` 与 `TabRow` 的目标态都是 0；
+    # 于是改指向「现存的内层选择器」——把登录页的通道 SegmentedButton 退回 TabRow。
+    # 这条一旦漏网，两个断言（`TabRow(` 残留 = 0、`SegmentedButton(` = 4）会同时红。
+    ("login/LoginScreen.kt",
+     "                SegmentedButton(\n                    selected = channel == selected,",
+     "                TabRow(\n                    selected = channel == selected,",
+     "有人把通道选择器退回老式 TabRow（P1 刚清掉的写法）"),
 
     ("student/StudentScreen.kt",
      "Switch(checked = reveal, onCheckedChange = null)",
@@ -116,7 +123,7 @@ MUTATIONS = [
     ("AppRoot.kt",
      "    Scaffold(\n        bottomBar = {",
      "    Scaffold(\n        topBar = { TopAppBar(title = { Text(\"标题\") }) },\n        bottomBar = {",
-     "有人在 AppRoot 里加了统一的 topBar —— 四个 Tab 会一起长顶栏（选项 a 被推翻）"),
+     "有人在 AppRoot 里加了统一的 topBar —— 三个 Tab 会一起长顶栏（选项 a 被推翻）"),
 
     ("timetable/TimetableScreen.kt",
      "    Column(modifier = Modifier.fillMaxSize()) {\n        Header(state = state,",
@@ -167,8 +174,8 @@ MUTATIONS = [
 
     ("grade/GradeScreen.kt",
      'JxauTopBar(title = "成绩", scrollBehavior = barBehavior)',
-     'JxauTopBar(title = "选课", scrollBehavior = barBehavior)',
-     "成绩页顶栏标题串成了「选课」（复制粘贴最典型的静默缺陷）"),
+     'JxauTopBar(title = "我的", scrollBehavior = barBehavior)',
+     "成绩页顶栏标题串成了另一个主页的标题（复制粘贴最典型的静默缺陷）"),
 
     ("advisor/AdvisorScreen.kt",
      'DetailScaffold(title = "导师信息", onBack = onBack) {',
@@ -192,7 +199,7 @@ def snapshot(root):
     """{相对路径(正斜杠) : 字节内容}。
 
     路径统一成正斜杠：`os.path.relpath` 在 Windows 上给的是反斜杠，
-    而 `MUTATIONS` 表里写的是 `selection/SelectionScreen.kt` —— 不统一就会 KeyError。
+    而 `MUTATIONS` 表里写的是 `advisor/AdvisorScreen.kt` 这种 —— 不统一就会 KeyError。
     """
     out = {}
     for dp, _, fns in os.walk(root):

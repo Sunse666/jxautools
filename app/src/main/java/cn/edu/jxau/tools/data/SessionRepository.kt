@@ -128,55 +128,17 @@ class SessionRepository private constructor(private val store: SessionStore) {
         _lastCheckText.value = "未登录"
     }
 
-    // ---------- 演练（Mock）模式 ----------
-
-    /** 当前是否处于演练模式（会话通道为 MOCK） */
-    fun isMockActive(): Boolean = _session.value?.channel == Channel.MOCK
-
-    /**
-     * 进入演练模式：备份真实会话，灌入 mock 会话。
-     *
-     * 拿 [healLock] 串行化：在途的校验/续期（保活第一跳可能挂着几十秒）完成前
-     * 不许切会话，否则切完会被陈旧的续期结果踩回去——2026-09-21 实测踩过。
-     *
-     * mock 会话带一个假 TGT（`MOCK-TGT-0001`，mock 服务端认它）——这不是多余：
-     * expire 场景里写接口返回会话失效页，引擎要走「TGT→ST→新会话」自愈后再重试，
-     * 这正是演练要覆盖的核心链路。真通道的 TGT 与此无关，已提前备份。
-     */
-    suspend fun enterMockMode() = healLock.withLock {
-        _session.value?.let { store.backupSessionForMock(it) }
-        store.pendingTgt = ""
-        adopt(
-            JxauSession(
-                channel = Channel.MOCK,
-                uuid = MOCK_UUID,
-                cookie = "ASP.NET_SessionId=$MOCK_COOKIE",
-                tgt = MOCK_TGT,
-                account = "mock",
-            )
-        )
-        _lastCheckText.value = "演练模式（Mock 服务端）"
-    }
-
-    /**
-     * 退出演练模式：恢复真实会话（没登录过就回到未登录）。
-     * 同样拿 [healLock]——理由同 [enterMockMode]。
-     */
-    suspend fun exitMockMode() = healLock.withLock {
-        val restored = store.restoreBackupAfterMock()
-        Http.resetCookies()
-        SessionCookieHolder.clear()
-        if (restored == null) {
-            store.clearSession()
-            _session.value = null
-            _hasTgt.value = false
-            _lastCheckText.value = "未登录"
-            JxauLog.i("已退出演练模式（无真实会话可恢复）")
-        } else {
-            adopt(restored)
-            _lastCheckText.value = "已退出演练模式"
-        }
-    }
+    // ---------- 演练（Mock）模式（去抢课分支已移除） ----------
+    //
+    // 2026-09-23 删掉了 `isMockActive` / `enterMockMode` / `exitMockMode` 三个方法：
+    // 它们的作用是「备份真实会话 → 灌入 mock 会话（带假 TGT）→ 退出时恢复」，
+    // 供抢课引擎在选课窗口外做端到端演练；抢课与 mock 一起下线后没有调用方。
+    // 同时删掉的还有 `MOCK_UUID` / `MOCK_COOKIE` / `MOCK_TGT` 三个常量。
+    //
+    // ⚠️ 原文里有一条**仍然成立**的教训，特意留在这里 —— 它属于会话层的通用规则，不属于抢课：
+    //   `healLock` 串行化的必要性：在途的校验/续期（保活第一跳可能挂着几十秒）完成前
+    //   不许切换会话，否则切完会被陈旧的续期结果踩回去。
+    //   见下方 [ensureHealthy] / 续期里的「陈旧续期防护」——**那段代码还在，不能删**。
 
     /**
      * 校验会话是否仍然有效。对应脚本 `_validate_saved_session`。
@@ -270,10 +232,11 @@ class SessionRepository private constructor(private val store: SessionStore) {
             JxauLog.i("尝试用 TGT 静默续期（免登录）…")
             val redeemed = CasAuth(profile).redeemSession(tgt = tgt)
             // 陈旧续期防护：redeemSession 要走一整条网络链（可能十几秒），
-            // 期间 _session 可能已被换掉——典型是用户切了演练模式或退出登录。
+            // 期间 _session 可能已被换掉——典型是用户退出登录或重新登录了另一个账号。
             // 这时本次续期是为一个已经不存在的会话做的，结果**作废**，不许覆盖当前会话。
-            // 实测教训（2026-09-21）：保活第一跳的续期晚到，把 mock 会话踩回真实会话，
-            // 整个演练静默失效，界面还显示「演练模式」。
+            // 实测教训（2026-09-21，发生在已下线的 mock 演练里，但结论与会话层通用）：
+            // 保活第一跳的续期晚到，把新会话踩回旧会话，整个切换**静默失效**，
+            // 界面还显示切换后的状态 —— 这正是「失效标记优先于正面证据」那条规则的来源。
             val latest = _session.value
             if (latest != null && latest !== current) {
                 JxauLog.w(
@@ -405,12 +368,8 @@ class SessionRepository private constructor(private val store: SessionStore) {
          */
         private const val MIN_VALIDATE_INTERVAL = 60_000L
 
-        /** mock 会话的固定凭据，与 tools/mock_jwgl.py 里的约定一致（标准 UUID 形态，CasAuth 正则认） */
-        const val MOCK_UUID = "00000000-0000-4000-8000-000000000001"
-        const val MOCK_COOKIE = "mocksession123"
-
-        /** mock 的 TGT：给了它，expire 场景的「TGT→ST→新会话」自愈链路才能在演练里完整走通 */
-        const val MOCK_TGT = "MOCK-TGT-0001"
+        // 去抢课分支（2026-09-23）删掉了 `MOCK_UUID` / `MOCK_COOKIE` / `MOCK_TGT`：
+        // 它们是 mock 演练的假凭据，唯一消费方是抢课引擎。
 
         @Volatile
         private var shared: SessionRepository? = null
