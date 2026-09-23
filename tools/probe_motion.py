@@ -4,13 +4,14 @@
 
 ## 为什么必须有这个
 
-`verify_motion.py` 报「16 项全 PASS」，只有两种可能：
+`verify_motion.py` 报「全部 PASS」，只有两种可能：
 它真的查对了，或者它什么都没查。光看 PASS 分不出来 —— 所以逐个把源码改坏，
 断言它必须报 FAIL。**一条改不坏的检查等于没有检查。**
 
 这一批尤其需要这层证明，因为「动画没生效」本身就是一种**看不见**的失败：
-`motionItem()` 少了 key、`SaveableStateProvider` 少了一层，界面依旧正常，
-只是动画不做、滚动位置丢失。没有变异探针，脚本写错了也不会有人发现。
+`motionItem()` 少了 key、`SaveableStateProvider` 少了一层、切页时两层半透明重叠，
+界面依旧正常，只是动画不做、滚动位置丢失、旧页的字从新页控件之间透出来。
+没有变异探针，脚本写错了也不会有人发现。
 
 ## 铁律（继承 `tools/kotlin-check/probe.py` 那次事故的教训）
 
@@ -57,8 +58,8 @@ MUTATIONS = [
      "Tab 内容没包在 SaveableStateProvider 里"),
 
     ("Motion.kt",
-     "fadeOut(spec)\n            transform.using(noSizeTransform())",
-     "fadeOut(spec)",
+     "fadeOut(exitFadeSpec())\n            transform.using(noSizeTransform())",
+     "fadeOut(exitFadeSpec())",
      "状态互换忘了关尺寸动画（新内容按旧尺寸裁剪）"),
 
     ("Motion.kt",
@@ -67,14 +68,14 @@ MUTATIONS = [
      "给 forward 加了默认值（等于允许「永远前进」）"),
 
     ("Motion.kt",
-     "const val SlideInMillis = 260",
-     "const val SlideInMillis = 360",
-     "页面进入时长超过 300ms"),
+     "const val SlideMillis = 300",
+     "const val SlideMillis = 360",
+     "位移时长超过 300ms（顺带破坏「延迟 + 时长 = 位移」这条结构等式）"),
 
     ("Motion.kt",
-     "const val SlideOutMillis = 200",
-     "const val SlideOutMillis = 260",
-     "退出与进入等长（两个页面半途互相顶住）"),
+     "const val ExitFadeMillis = 90",
+     "const val ExitFadeMillis = 200",
+     "退出 alpha 拖到进入 alpha 起跑之后 —— 两个窗口出现重叠 = 切页字符粘连"),
 
     ("timetable/TimetableScreen.kt",
      "target = motionPhase(\n"
@@ -100,6 +101,39 @@ MUTATIONS = [
      "    val Exit = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)",
      "    val Exit = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)",
      "退出与进入用了同一条缓动（失去前后层次）"),
+
+    # ---- 以下 6 条针对 §9（2026-09-23「切页字符粘连」那一批）----
+    # 这 6 条有一个共同点：改完**编译通过、界面不崩、动画照跑**，只有肉眼看得出旧页的字透出来。
+    ("Motion.kt",
+     "    delayMillis = Motion.EnterFadeDelayMillis,\n",
+     "",
+     "进入侧淡入不再延迟起跑 —— 两个 alpha 窗口重叠，切页字符粘连回来"),
+
+    ("Motion.kt",
+     "(slideInHorizontally(enterSlide) { dir * offsetPx } + fadeIn(enterFadeSpec())) togetherWith",
+     "(slideInHorizontally(enterSlide) { dir * offsetPx }"
+     " + fadeIn(tween<Float>(Motion.EnterFadeMillis))) togetherWith",
+     "绕过 `enterFadeSpec()` 自己内联一个无延迟的规格（两个入口各写一份的开始）"),
+
+    ("Motion.kt",
+     "    Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) { content() }",
+     "    Box { content() }",
+     "每层内容不再自带不透明底 —— 掉帧时半透明的底下是上一个页面"),
+
+    ("Motion.kt",
+     "        targetState = target,\n        modifier = modifier.clipToBounds(),",
+     "        targetState = target,\n        modifier = modifier,",
+     "页面级容器不再裁剪 —— 位移会让内容画到容器外（半屏容器上看得见）"),
+
+    ("Motion.kt",
+     ") { state -> MotionLayer { content(state) } }\n}\n\n/**\n * 进入侧的淡入规格",
+     ") { state -> content(state) }\n}\n\n/**\n * 进入侧的淡入规格",
+     "页面级过渡的内容没包 `MotionLayer`（少了那层不透明底）"),
+
+    ("Motion.kt",
+     "slideInHorizontally(enterSlide) { dir * offsetPx }",
+     "slideInHorizontally(enterSlide) { it / 2 }",
+     "位移距离改回 `it / 2` 半屏（放大旧页可见区、大屏上过度）"),
 ]
 
 # 检查脚本自身的变异：证明 §0 自证那两条不是摆设。

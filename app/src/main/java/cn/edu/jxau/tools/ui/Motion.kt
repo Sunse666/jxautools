@@ -5,6 +5,7 @@ import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -15,10 +16,16 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 
 /**
  * # 全应用的动效约定
@@ -40,6 +47,25 @@ import androidx.compose.ui.unit.IntOffset
  *    加了会让整屏色彩流动，看上去是「卡」而不是「流畅」。
  * 3. **时长宁短勿长。** 交互反馈超过 ~300ms 就开始像卡顿。本文件所有值都压在 300ms 以内。
  *
+ * ## 过渡期只能有一层在画（2026-09-23 修复「切页字符粘连」）
+ *
+ * 现象：切页时上一个页面的字短暂残留，新页面的控件直接盖在其上，过一会儿才消失。
+ *
+ * 根因不是渲染管线，是**交叉淡入的物理后果**：`AnimatedContent` 在过渡期内把新旧两层
+ * **同时留在组合树里并同时绘制**，而两侧 alpha 若同起同止，就必然存在一段「两层各半透明」
+ * 的窗口 —— 两张版式真的在同一个像素上混合，旧页的字自然从新页控件之间透出来。
+ * 残留窗口的长度 = 退出时长；过渡一结束旧内容被移出组合树，字就没了。
+ *
+ * 官方 Material 3 的做法不是把交叉淡入调快，而是把两个 alpha 窗口**错开**
+ * （`SharedAxisX`：退出 `fadeOut(90)`，进入 `fadeIn(210, delayMillis = 90)` ——
+ * 退出在 0~90ms 淡完，进入 90ms 才开始变亮，**零重叠**）。位移两边照旧同时跑满 300ms，
+ * 所以「被推走」的空间感一点没丢。见 [Motion.EnterFadeDelayMillis]。
+ *
+ * 三条同时成立才算修干净，缺任一条都会退回粘连（`verify_motion.py` §9 三项都守着）：
+ * ① 两个 alpha 窗口不重叠（[Motion.ExitFadeMillis] ≤ [Motion.EnterFadeDelayMillis]）；
+ * ② 进入侧 alpha **必须延迟起跑**（有 delay，不是删掉淡入 —— 删了会丢手感）；
+ * ③ 每一层内容自带不透明底（[MotionLayer]），半透明期间底下是页面底色而不是上一个页面。
+ *
  * ## 无障碍
  * Compose 的 `Transition` 会读系统的 `MotionDurationScale`（即开发者选项里的「动画时长缩放」），
  * 用户把它关成 0 时这里的动画自动变成瞬切 —— **不需要自己判**。只有 `InfiniteTransition`
@@ -47,28 +73,61 @@ import androidx.compose.ui.unit.IntOffset
  */
 internal object Motion {
 
-    /** 有前后顺序的页面切换：新页面进来 */
-    const val SlideInMillis = 260
+    /**
+     * 页面位移时长，两个方向都是它。
+     *
+     * 取 Material 3 `SharedAxisX` 官方参考实现的值：位移 300ms 全程跑满，
+     * **只有 alpha 是错开的**（见下面三条）。位移两侧等长是官方语义 ——
+     * 「新页推进来」和「旧页被推走」本来就是同一段相对位移的两半。
+     */
+    const val SlideMillis = 300
 
     /**
-     * 有前后顺序的页面切换：旧页面出去。
+     * 进入侧 alpha 的**起跑延迟**。⚠️ 这条是「切页字符粘连」的根治点。
      *
-     * 比 [SlideInMillis] 短一截是**有意**的 —— 两条时长相等时，两个页面在半途会互相「顶住」，
-     * 看起来像卡了一下；退出更快才有「被新页面推走」的层次。
+     * 官方 `SharedAxisX` 的进出淡变是错开的：退出 `fadeOut(90)` 在 0~90ms 淡完，
+     * 进入 `fadeIn(210, delayMillis = 90)` 从 90ms 才开始变亮 —— 任何一帧只有一页在画。
+     *
+     * **把它去掉（或改成 0）就退回「两层同时半透明」**，上一个页面的字会从新页面控件
+     * 之间透出来。此时编译通过、界面不崩、动画照跑，只有肉眼能看出来
+     * —— 所以 `verify_motion.py` §9 专门守这条。
      */
-    const val SlideOutMillis = 200
+    const val EnterFadeDelayMillis = 90
 
-    /** 同位置的状态互换（加载中 ↔ 失败 ↔ 内容）。要快：慢下来就不像「加载完成」，像「卡了一下」 */
-    const val SwapMillis = 170
+    /** 进入侧 alpha 时长（自 [EnterFadeDelayMillis] 起算）。90 + 210 = 300，与位移同时结束 */
+    const val EnterFadeMillis = 210
+
+    /**
+     * 退出侧 alpha 时长。
+     *
+     * **必须 ≤ [EnterFadeDelayMillis]**，否则两个 alpha 窗口出现重叠区间、
+     * 重叠的那几帧两层都半透明 —— 就是残留本身。这条不是「越短越好」的审美，
+     * 是零重叠的充分条件（`verify_motion.py` §9a）。
+     */
+    const val ExitFadeMillis = 90
+
+    /**
+     * `SharedAxisX` 的位移距离：**固定 30dp，不随屏宽**（官方值）。
+     *
+     * 曾经用 `it / 2`（半屏）：半屏滑动会让「旧页仍可见的区域」大得多，
+     * 大屏上位移也过度，还让每一帧多绘制一份接近满屏的内容（课表页是两个 canvas）。
+     * 30dp 足够表达方向。
+     */
+    const val SharedAxisOffsetDp = 30
+
+    /**
+     * 同位置的状态互换（加载中 ↔ 失败 ↔ 内容）的起始缩放。
+     *
+     * 取 M3 `fadeThrough` 的 0.92：比原来的 0.98 明显一点，是官方值 ——
+     * 因为进入的 alpha 被延迟了 90ms，「浮现感」改由缩放来承担，不然那 90ms 里新内容什么也没做。
+     */
+    const val SwapEnterScale = 0.92f
 
     /** 高度变化（展开 / 折叠） */
     const val ResizeMillis = 240
 
     /** 列表项增删淡入淡出 */
     const val ItemMillis = 200
-
-    /** 状态互换时的起始缩放。0.98 = 几乎看不出缩放，只是让内容「浮」出来而不是硬替换 */
-    const val SwapScale = 0.98f
 }
 
 /**
@@ -91,7 +150,7 @@ internal object MotionEasing {
 }
 
 /**
- * 同一位置的多个状态之间互换：交叉淡入 + 轻微放大。
+ * 同一位置的多个状态之间互换：**先出后进**的淡变 + 轻微放大。
  *
  * 用在「本来就是同一块地方，只是内容换了一版」——加载中 / 失败 / 内容三种态，
  * 以及登录页 ↔ 主界面。这类切换**没有前后方向**，横着推会被误读成「翻到下一页了」。
@@ -101,6 +160,11 @@ internal object MotionEasing {
  *    同一份内容，动画照跑、界面正常，只是内容不对 —— 编译器和运行时都不报。
  * 2. `target` 必须是**稳定的可比较值**（枚举 / 字符串 / 数据类）。每次组合都给新实例的对象会让它
  *    每一帧都在切换。
+ *
+ * ## 为什么不是「交叉淡入」
+ * 交叉淡入（两侧同起同止的 170ms）在物理上就是「两张版式在同一像素上混合」——
+ * 内容块之间没有不透明底的地方，旧页的字会从新页里透出来。这里按 M3 `fadeThrough` 的
+ * 数值改成先出后进：退出 90ms 淡完，进入从 90ms 起 210ms 淡入，**两个窗口零重叠**。
  *
  * `SizeTransform` 显式关掉：默认的尺寸动画会在「160dp 的加载框 → 撑满的内容」这类切换里
  * 把新内容按旧尺寸裁剪，看起来是被压扁后弹开。
@@ -114,16 +178,21 @@ internal fun <T> MotionSwap(
 ) {
     AnimatedContent(
         targetState = target,
-        modifier = modifier,
+        // ⚠️ `clipToBounds()` 与 `noSizeTransform()` 的 `clip = false` 不冲突：
+        // 后者管「内容变尺寸时要不要按动画中的尺寸裁」，前者管「子项不许画到容器外」。
+        // 加它是因为位移会让内容画到容器边界之外（尤其比屏幕小的容器，见 `ProfileScreen` 子页）。
+        modifier = modifier.clipToBounds(),
         transitionSpec = {
-            val spec = tween<Float>(Motion.SwapMillis, easing = MotionEasing.Standard)
+            // ⚠️ 进入侧的 alpha **必须用 `enterFadeSpec()`**，它带 delayMillis。
+            // 这里是最容易被「顺手优化」掉的一处：把 delay 去掉后动画看着更跟手，
+            // 代价是那 90ms 里两层同时半透明 → 切页字符粘连。
             val transform: ContentTransform =
-                (fadeIn(spec) + scaleIn(spec, initialScale = Motion.SwapScale)) togetherWith
-                    fadeOut(spec)
+                (fadeIn(enterFadeSpec()) + scaleIn(enterFadeSpec(), initialScale = Motion.SwapEnterScale)) togetherWith
+                    fadeOut(exitFadeSpec())
             transform.using(noSizeTransform())
         },
         label = label,
-    ) { state -> content(state) }
+    ) { state -> MotionLayer { content(state) } }
 }
 
 /**
@@ -135,13 +204,14 @@ internal fun <T> MotionSwap(
  * 而那看起来只是「动画不太对」，没人会当成 bug 报上来，只会觉得「有点怪」。
  * 宁可每个调用点都显式写一次规则。
  *
- * 位移取半屏（`it / 2`）而不是整屏：整屏滑动会让新页面从屏幕边缘外画进来，
- * 每一帧都要多绘制一份满屏内容（课表页是两个 canvas），而且视觉上过度。半屏足够表达方向。
+ * 位移距离是固定的 [Motion.SharedAxisOffsetDp]（30dp），**不是半屏**：见那条常量的说明。
  *
  * ⚠️ 调用方**必须自己包一层 `rememberSaveableStateHolder()`**（见 `AppRoot.MainShell`
  * 与 `ProfileScreen`）。`AnimatedContent` 在过渡结束后会把旧内容移出组合树，
  * 那上面的 `rememberSaveable`（滚动位置、输入框内容）就没了 —— 表现是「切走再切回来，
  * 位置回到顶部」。这是最容易漏的一处：加了动画之后反而比不加更差，而每一处看起来都正常。
+ *
+ * ⚠️ **不要改回「交叉淡入」**（进出 alpha 同时起跑）。见文件头的「过渡期只能有一层在画」。
  */
 @Composable
 internal fun <T> MotionPager(
@@ -151,27 +221,67 @@ internal fun <T> MotionPager(
     modifier: Modifier = Modifier,
     content: @Composable (T) -> Unit,
 ) {
+    // `transitionSpec` 不是 `@Composable`，读不到 `LocalDensity` —— 所以在这里先换算成像素。
+    // 写得「绕」是有原因的：不能把 `dp` 直接塞进 lambda，那里没有 Composition 上下文。
+    val offsetPx = with(LocalDensity.current) { Motion.SharedAxisOffsetDp.dp.roundToPx() }
+
     AnimatedContent(
         targetState = target,
-        modifier = modifier,
+        modifier = modifier.clipToBounds(),
         transitionSpec = {
-            val toForward = forward(initialState, targetState)
-            val enter = tween<IntOffset>(Motion.SlideInMillis, easing = MotionEasing.Enter)
-            val leave = tween<IntOffset>(Motion.SlideOutMillis, easing = MotionEasing.Exit)
-            val enterFade = tween<Float>(Motion.SlideInMillis, easing = MotionEasing.Enter)
-            val leaveFade = tween<Float>(Motion.SlideOutMillis, easing = MotionEasing.Exit)
+            val dir = if (forward(initialState, targetState)) 1 else -1
+            val enterSlide = tween<IntOffset>(Motion.SlideMillis, easing = MotionEasing.Enter)
+            val leaveSlide = tween<IntOffset>(Motion.SlideMillis, easing = MotionEasing.Exit)
 
-            val transform: ContentTransform = if (toForward) {
-                (slideInHorizontally(enter) { it / 2 } + fadeIn(enterFade)) togetherWith
-                    (slideOutHorizontally(leave) { -it / 2 } + fadeOut(leaveFade))
-            } else {
-                (slideInHorizontally(enter) { -it / 2 } + fadeIn(enterFade)) togetherWith
-                    (slideOutHorizontally(leave) { it / 2 } + fadeOut(leaveFade))
-            }
+            val transform: ContentTransform =
+                (slideInHorizontally(enterSlide) { dir * offsetPx } + fadeIn(enterFadeSpec())) togetherWith
+                    (slideOutHorizontally(leaveSlide) { -dir * offsetPx } + fadeOut(exitFadeSpec()))
             transform.using(noSizeTransform())
         },
         label = label,
-    ) { state -> content(state) }
+    ) { state -> MotionLayer { content(state) } }
+}
+
+/**
+ * 进入侧的淡入规格：**必须延迟起跑**，理由见 [Motion.EnterFadeDelayMillis]。
+ *
+ * 抽成一个函数（而不是在两个入口各写一遍 `tween(...)`）是为了让「延迟」这件事**只有一处定义** ——
+ * 各写一遍的话，将来调时长时只改一处就悄悄退化成两层半透明，而那正是要防的失效。
+ * `verify_motion.py` §9c/§9e 守着「这个函数带 delay」+「两处 `fadeIn` 都用它」。
+ */
+private fun enterFadeSpec(): FiniteAnimationSpec<Float> = tween(
+    Motion.EnterFadeMillis,
+    delayMillis = Motion.EnterFadeDelayMillis,
+    easing = MotionEasing.Enter,
+)
+
+/** 退出侧的淡出规格。只需 ≤ [Motion.EnterFadeDelayMillis]，见 [Motion.ExitFadeMillis] */
+private fun exitFadeSpec(): FiniteAnimationSpec<Float> =
+    tween(Motion.ExitFadeMillis, easing = MotionEasing.Exit)
+
+/**
+ * 给过渡里的**每一层内容**补一块不透明底。当前色取 [MaterialTheme.colorScheme] 的 `background`。
+ *
+ * ## 为什么必须补在「每一层」上，而不是包在整个容器外
+ * `AnimatedContent` 的过渡期里新旧两层**都在组合树里、都被绘制**。全应用唯一的不透明底在
+ * `MainActivity` 的根 `Surface`，位于这两层**之下** —— 它遮不住旧层。旧层自己也是透明的
+ * （页面根一律是裸 `Column(fillMaxSize())`，只有顶栏和 `Card` 自带容器色），
+ * 于是「新页面控件盖住了旧字、字还在控件之间露出来」。
+ *
+ * 包在容器**外**没有用：那样背景会被画在两层**之下**，还是被旧层压在上面。
+ * 必须包在每一层**里面**，让「这一层的底色」和「这一层的内容」同生共死、一起被 alpha 影响。
+ *
+ * ## 尺寸中性（这是它能安全套在 11 个调用点上的前提）
+ * `Box` 不带任何尺寸修饰，尺寸 = 内容尺寸，不改变任何布局。页面的内容本来就是
+ * `fillMaxSize()`，所以这层底自然也铺满整屏。
+ *
+ * 有了它以后再叠 [Motion.EnterFadeDelayMillis] 的错开，进入层开始变亮时旧层 alpha 已经是 0，
+ * 正常路径下这层底根本用不上 —— 它防的是**极端掉帧**：动画卡在中间态时，
+ * 半透明的底下是页面底色，而不是上一个页面。
+ */
+@Composable
+private fun MotionLayer(content: @Composable () -> Unit) {
+    Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) { content() }
 }
 
 /**
@@ -228,6 +338,8 @@ internal fun LazyItemScope.motionItem(): Modifier = Modifier.animateItem(
  * 两种写法都能编译：默认的 `SizeTransform()` 会把内容盒子的尺寸也插值，于是「160dp 的加载框
  * 变成撑满的内容」会先按 160dp 的高度裁剪新内容，看起来是被压扁后弹开。
  * 这里明确给出「尺寸立刻变、也不裁剪」。
+ *
+ * 与入口上的 `clipToBounds()` 是两个不同的问题，见 [MotionSwap] 的注释。
  */
 private fun noSizeTransform(): SizeTransform = SizeTransform(
     clip = false,
