@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// release 签名凭据：`.secrets/keystore.properties`（该目录已在 .gitignore 里排除）。
+// **缺失时不报错**，release 退化为「未签名包」—— 新克隆的机器照样能编译，只是打不出可安装的正式包。
+val keystorePropsFile = rootProject.file(".secrets/keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -16,10 +27,34 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        create("release") {
+            if (keystorePropsFile.exists()) {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // minSdk 26 的机器只读 v2/v3，但第三方安装器（应用宝、手机厂商商店的本地安装）
+                // 与部分国产 ROM 仍会查 v1 签名。三个都开，代价只是 APK 里多一段签名块。
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // 段 1：**先不开 R8**。签名与混淆分两步走 —— R8 的失败是运行期静默的，
+            // 和签名捆在同一步做，出问题分不清是哪一边（见 docs/发布说明 §阶段划分）。
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 显式写出来：debuggable 是「能编译、界面正常、但私有目录可被 run-as 拖走」的那类开关，
+            // 靠默认值等于靠别人替你记着。
+            isDebuggable = false
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

@@ -33,35 +33,31 @@
 - .NET 日期：`/Date(-62135596800000)/` = MinValue → **必须判成 null**；按东八区解释。
 
 ## 功能进度
-- **T1 已交付**：P0（导航 5→4 · 考试安排页 · 考试 .ics，`9917f03`）· P1（学籍/导师/学期规划挂「我的信息」下，
-  `63bee37`）。**T1-P2 今日课程通知已砍净**（`c3c1a12`：拿不到节次钟点 → 只能提醒「第几节」）；**只留一件缺陷
-  修复**：`BootReceiver` + `RECEIVE_BOOT_COMPLETED`（重启后抢课定时曾**静默丢失**），顺带修掉**幽灵闹钟**与
-  **direct boot 竞态**。作废文件在 `tools/out/p2_dropped/`。
+- **T1 已交付**：P0 导航 5→4 + 考试安排页 + 考试 .ics（`9917f03`）· P1 学籍/导师/学期规划挂「我的信息」下
+  （`63bee37`）。**T1-P2 今日课程通知已砍净**（`c3c1a12`）；**只留一件缺陷修复**：`BootReceiver` +
+  `RECEIVE_BOOT_COMPLETED`（重启后抢课定时曾**静默丢失**）+ **幽灵闹钟** + **direct boot 竞态**。
 - **T2-P0 刚开**：只读探针已跑（`tools/probe_t2_score.py` → `tools/out/t2_score_probe.txt`）：①学号可自取
-  （`GetUserInfo.Xh`）②`GetKcPointListByXh` 带/不带 `xh` **完全相同、0 真课程行** → 不是缺参数、是当前无数据，
-  绩点页只能停在「口径说明 + 服务端无数据」；⚠️ **未区分**「本生确无主干课程绩点」与「还缺别的参数」→
-  换个有成绩的账号复核即可区分。③`GetPersonalJxjh` 可用 102 行 ④`GetCjPdfList` 0 行（正常）。
-- **UI 改造**：UI-P0 `ca8e69c` · UI-P1 控件归位 `8f3100d` · UI-P2 设置页行归位 `9c2de8a` · UI-P3 顶栏骨架
-  `7485d3a` · 动效 `38d4496`+`214cda8` · **切页字符粘连修复（2026-09-23）** 均已交付。**只剩一条开着**：
-  `GradeScreen.GradeRow` 要不要 `ListItem` 化（行高 48→56dp，少看两条成绩）—— 取舍权在用户。
-- **切页「字符粘连」已修**（`ui/Motion.kt` 一个文件、11 个调用点未动；全文 `docs/UI改造实施大纲.md` §10.8+§10.9）：
-  根因 = `AnimatedContent` 过渡期**两层都在组合树里、都被绘制**，交叉淡入（两侧 alpha 同起同止）必然留一个
-  重叠窗口。**修法是「错开」不是「删 `fadeIn`」**（M3 SharedAxisX：出 `fadeOut(90)` / 进 `fadeIn(210,
-  delayMillis = 90)`；位移两侧都 300ms）。三条同时成立才算干净：① 零重叠窗口；② 进入侧 alpha 带 delay 且
-  **只有一处定义**（`enterFadeSpec()`）；③ 每层内容自带不透明底（`MotionLayer`）——⚠️ **包在容器外无效**，
-  背景会被画在两层**之下**。位移固定 **30dp**，半屏会放大旧页可见区。Tab 保留横滑（用户拍板）。
-  **`MotionLayer` 刻意不加 `fillMaxSize()`**（入口 `modifier` 由调用点给，加了会让小卡片被撑满宽 = 布局变）。
-  **归因必须分两环**（用户第二次报告归到「页面缺底」，只对一半）：**环 A 两页共存 = 决定「会不会」残留；
-  环 B 两层都没底 = 只决定「从哪透出来」**（缝隙而非整片）。**只补底不修 A 没用** —— 补的底**自己也在这层
-  的 alpha 之下**。零重叠是**结构性**的（退出归零与进入起跑是同一个常数）→ 掉帧也不会重新叠上。
-  ⚠️ **`t ∈ (0,90)` 只看得到旧页（在淡出）是 M3 fade through 的定义，不是残留**；判据是「同一像素上是否
-  同时有两层」。想更短调小 `ExitFadeMillis`，**别动 `EnterFadeDelayMillis` 去抵消**（会重新制造重叠）。
-  守它的是 `verify_motion.py` §9（13 项）+ `probe_motion.py` 7 条专打 §9 的变异。
-- **「过渡层正下方那层」的底色必须与底同源**：`background` #F8F9FC **≠** `surface` #FFFFFF（`Theme.kt:43/46`）
-  → `MotionSwap` 的 `scaleIn(0.92)` 让进入层缩到 92%，外圈露的正是 `Scaffold` 的容器色（`AppRoot.kt:110`，
-  不传即默认 `background`）→ 显式传 `surface` 会露一圈白边。`verify_motion.py` §9l/§9m + §0g 守着（真
-  `Scaffold` 全应用只 **1** 处；`DetailScaffold(` 是 `Column`，**不是** `Scaffold`）。根 `Surface`
-  （`MainActivity.kt:77`）不进断言：被不透明的 `Scaffold` 整片盖住，过渡期从来不是可见层。
+  （`GetUserInfo.Xh`）②`GetKcPointListByXh` 带/不带 `xh` **完全相同、0 真课程行** → 不是缺参数、是当前无数据；
+  ⚠️ **未区分**「本生确无主干课程绩点」与「还缺别的参数」→ 换个有成绩的账号即可区分。③`GetPersonalJxjh`
+  可用 102 行 ④`GetCjPdfList` 0 行（正常）。
+- **UI 改造**：UI-P0 `ca8e69c` · P1 控件归位 `8f3100d` · P2 设置页行归位 `9c2de8a` · P3 顶栏骨架 `7485d3a` ·
+  动效 `38d4496`+`214cda8` · 切页粘连修复（2026-09-23）均已交付。**只剩一条开着**：`GradeScreen.GradeRow`
+  要不要 `ListItem` 化（48→56dp，少看两条成绩）—— 取舍权在用户。
+- **切页「字符粘连」已修**（`ui/Motion.kt` 单文件、11 个调用点未动；全文 `docs/UI改造实施大纲.md` §10.8+§10.9）：
+  根因 = 过渡期**两层都在组合树里、都被绘制** + 两侧 alpha 同起同止。**修法是「错开」不是「删 `fadeIn`」**
+  （M3 SharedAxisX：出 `fadeOut(90)` / 进 `fadeIn(210, delayMillis = 90)`；位移 300ms、固定 **30dp**）。
+  ⚠️ 进入侧 alpha 的 delay **只有一处定义**（`enterFadeSpec()`）—— 各写一份则改一处就静默退回粘连；
+  ⚠️ **`MotionLayer` 刻意不加 `fillMaxSize()`**（入口 modifier 由调用点给，加了会把小卡片撑满宽 = 布局变）；
+  零重叠是**结构性**的（退出归零与进入起跑是**同一个常数**）→ 掉帧也不会重新叠上。Tab 保留横滑（用户拍板）。
+  **归因要分两环**（用户第二次归到「页面缺底」，只对一半）：环 A 两页共存 = 决定「会不会」残留；环 B 两层都
+  没底 = 只决定「从哪透出来」（**缝隙**而非整片）→ **只补底不修 A 没用**（补的底自己也在这层的 alpha 之下）。
+  ⚠️ **`t∈(0,90)` 只看得到旧页是 M3 fade through 的定义，不是残留**（想更短调小 `ExitFadeMillis`，
+  **别动 `EnterFadeDelayMillis` 抵消** —— 会重新制造重叠）。判据 =「同一像素上是否同时有两层」。
+  守它：`verify_motion.py` §9（13 项）+ `probe_motion.py` 7 条专打 §9 的变异。
+- **过渡层正下方那层的底色必须同源**：`background` #F8F9FC **≠** `surface` #FFFFFF（`Theme.kt:43/46`）→
+  `scaleIn(0.92)` 让进入层缩到 92%，外圈露的正是 `Scaffold` 容器色（`AppRoot.kt:110`，不传即默认 background）
+  → 显式传 `surface` 会露一圈白边。守它：`verify_motion.py` §9l/§9m + §0g（真 `Scaffold` 全应用只 **1** 处；
+  `DetailScaffold(` 是 `Column` 不是 `Scaffold`；根 `Surface` 不进断言 —— 它被不透明 `Scaffold` 整片盖住）。
 - **真机验收**：清单 `docs/UI改造真机验收清单.md`。§1/§2/§3 共 15 项 → 13 过、**2 项未跑**（2-1 访问通道三段 /
   2-3① 记住密码：都要退出登录、可能触发人工验证码，风险不对等）；§4 5/5 · §5 5/5。⚠️ **§5 的 5-1 / 5-3 是对旧
   结构（交叉淡入）验的，2026-09-23 改结构后已失效**，按新增的 **§6** 重跑。**§6-2（慢速变异包 ×8 + 字形互斥）
@@ -72,62 +68,68 @@
 - 新排功能判据（换掉「按接口好挖排」）：一学期真会用几次 · 有无等效替代 · 出错可否挽回。
 
 ## 工程事实（会咬人的）
+- **正式包（release）已打通（2026-09-23）**：密钥/凭据在 `.secrets/`（已 gitignore，**必须备份到仓库之外**
+  —— 丢了已装用户**无法覆盖升级**）。v1/v2/v3 全开；⚠️ **apksigner 报 `v1: false` 是「minSdk≥24 不要求校验」
+  之意、不是没签**（看 `META-INF/CERT.SF|RSA` + `jarsigner -verify`）。⚠️ **装 release 前必须先卸载 debug 包**
+  （签名不同 → `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 且清数据）；**不能用自检项数区分 debug/release**（同代码
+  同项数）。**段 2（R8）未做** → 全文 `docs/发布说明.md`。
+- **启动图标已换（2026-09-23）**：`icon.ico` → 5×5 方格**矢量**（108dp 画布 / 外接框 18..90=72dp）
+  + monochrome 层 + 5 张 legacy PNG；底色 `#1565C0`→`#F0F0F0`（原白学士帽已替换，git 可回退）。
+  ⚠️ **判据教训：格中心采样只判「哪些格亮」，判不出「格内尺寸」**（矩形右边界 32.4→30 矩阵纹丝不动，
+  图形已偷偷瘦一圈）→ 必须补**像素级对账**才够。工具 `tools/make_launcher_icon.py` + `probe_launcher_icon.py`。
 - **交付 ≠ 编译**：`:app:compileDebugKotlin` **不产出 APK**。改了源码只跑 compile，`app-debug.apk` 停在旧时间戳
   → 装机看到的还是旧界面，而编译零 `e:` 零 `w:`、静态验证全绿，查无可查。**凡要装给人看的一律
   `:app:assembleDebug`**，装前核 APK 时间戳晚于 `git log -1 --format='%ci'`。**新旧包一眼判别：自检项数**
   （旧包 520/520、含 P3 的 654/654）。
 - **本仓库没有 `gradlew`**（无 wrapper），用本机发行版（全量约 80s）；完整命令见 `docs/工程踩坑总表.md`。
-- **Gradle 沙箱假死**（2026-09-22 遇到；**09-23 复跑未再出现**）：写 `app/build/intermediates` 被拦 →
-  `dexBuilderDebug FAILED`，错误还被 grep 过滤器吞掉。**dexBuilder 失败先怀疑沙箱，不是代码**。
-- **写静态脚本的三条自身陷阱**（都踩过都修了）：① **扫描器多吐一个字符，错的是用它的人**（`call_spans` 的参数
-  曾多带一个闭括号，「包含判断」察觉不到、「精确比较」必误报）；② **剥块注释要把换行补回来**，否则后面所有行号
-  前移 —— 「查得对但指错位置」比没有脚本更贵；③ **探针抓不住的防御就是多余的防御** —— 自认为有用的一层
-  （如再切一次「尾随 lambda」）若变异抓不住它，说明它管的正是别人已经在管的事，删掉并写清理由。
-- **M3 顶栏两条硬事实**（无编译期保障）：①小 `TopAppBar` + `enterAlwaysScrollBehavior` 真的会让出高度
-  （字节码 `heightOffsetLimit = -expandedHeight`）；②`TopAppBarScrollBehavior` 是实验 API，**出现在函数签名里
-  就会让所有调用点都要 `@OptIn`**，别用 `@file:OptIn` 盖住。顶栏不在 `AppRoot` 的 `Scaffold` 里（一加 `topBar`
-  槽课表页会跟着长），由静态断言 + 变异探针守着。
+- **Gradle 沙箱假死**（09-22 遇到、09-23 复跑未再现）：写 `app/build/intermediates` 被拦 → `dexBuilderDebug
+  FAILED` 且错误被 grep 吞掉。**dexBuilder 失败先怀疑沙箱，不是代码**。
+- **写静态脚本的三条自身陷阱**：① **扫描器多吐一个字符，错的是用它的人**（`call_spans` 的参数曾多带一个
+  闭括号 —— 「包含判断」察觉不到、「精确比较」必误报）；② **剥块注释要把换行补回来**，否则后面行号全前移，
+  「查得对但指错位置」比没有脚本更贵；③ **探针抓不住的防御就是多余的防御**（变异抓不住 = 它管的正是别人
+  已在管的事）→ 删掉并写清理由。
+- **M3 顶栏两条硬事实**（无编译期保障）：①小 `TopAppBar` + `enterAlwaysScrollBehavior` **真的会让出高度**；
+  ②`TopAppBarScrollBehavior` 是实验 API，**出现在函数签名里就会让所有调用点都要 `@OptIn`**。顶栏**不在**
+  `AppRoot` 的 `Scaffold` 里（一加 `topBar` 槽课表页会跟着长），由静态断言 + 变异探针守着。
 
 ## 验收武器（真机由用户执行，判据必须可复算）
-- `verify_boot_restore.py` 三轮 8/8 · 5/5 · 6/6。变异**必须落在编译产物上**：组件级 `pm disable-user` 在
-  Android 11+ 连 root 也被拒；包级 `pm disable` 在 MuMu 上不跨重启保持 → 只有「注释掉清单里的 `<receiver>`
-  重建装机」可靠。**跑完必须改回并重建正式包**。
+- `verify_boot_restore.py` 三轮 8/8 · 5/5 · 6/6。变异**必须落在编译产物上**（组件级 `pm disable-user` 在
+  Android 11+ 连 root 也被拒；包级 `pm disable` 在 MuMu 上不跨重启保持）→ 只有「注释掉清单里的 `<receiver>`
+  重建装机」可靠，**跑完必须改回并重建正式包**。
 - `scan_theme_apply.py` —— 跨配置**不变像素**扫描：N 张主题截图里每通道差 ≤2 **且 `max−min>40`（有饱和度）**
-  的像素 = 没跟主题走的嫌疑。**「有饱和度」是关键条件**。退出码 1 = 有嫌疑。
-- **偏移扫描**：整屏差异率会把「整体平移」误报成「内容真变了」，**别拿它当结论**（实证：字号 4 档整屏差
-  12.9%，dy=+9 时 0.000%）。
+  的像素 = 没跟主题走的嫌疑。**「有饱和度」是关键条件**。
+- **偏移扫描**：整屏差异率会把「整体平移」误报成「内容真变了」，**别拿它当结论**（实证：字号 4 档差 12.9%，
+  dy=+9 时 0.000%）。
 - **慢速变异包**：≤300ms 的过渡抓不到连续轨迹 → 时长 ×8 重装，连拍每张都是中间态。**凡「过程不可见」的验证
   都适用：放大时间尺度再采样**。配套 `measure_motion_transition.py`。
 - 真机脚本铁律：需要 root 的操作，root 必须在每次操作前自证（`id` 含 `uid=0`）；但**别无脑 `adb root`**。
 - **本机 PATH 里没有 `adb`**（2026-09-23 实测）→ 装了什么包只能用户自己看，别承诺替查。
 
 ## 协作方式（2026-09-22 起）
-- **真机测试默认由用户执行**；经用户拍板的**预跑批次例外**（如 UI 验收 §1-§5），跑完把判据留进验收清单供复核。
-  变异实验只在预跑批次内做，**跑完必须还原并重建正式包**，设备设置也要改回。
-- 自己做的：只读检查（git / 读文件 / dumpsys 只读查询）、离线构建与编译、进程内自检、纯逻辑对账脚本。
+- **真机测试默认由用户执行**；经用户拍板的**预跑批次例外**（跑完把判据留进验收清单供复核）。变异实验只在
+  预跑批次内做，**跑完必须还原并重建正式包**。自己做的：只读检查、离线构建与编译、进程内自检、纯逻辑对账。
 
 ## 最常引用的那几条（完整表述见 `docs/工程踩坑总表.md`）
 - **「设置改了但页面没变」= 静默失效**：页面/VM 必须**订阅**偏好，不能只在 `load()` 读一次；配置一律单例 + StateFlow。
-- **课表行高** = 每行高 + `spacedBy` 的真空隙（**不是**「行高 = pitchDp」）→ 贴边要比**内缩后**的矩形。
+- **课表行高** = 每行高 + `spacedBy` 真空隙（**不是**「行高 = pitchDp」）→ 贴边要比**内缩后**的矩形。
 - **课表滚动**：节次轴跟内容一起纵向滚；横纵必须父子嵌套容器；表头与网格共享同一个 ScrollState。
-- **深色配色不能靠压暗浅色底**（十色塌缩成深灰）→ `mix(surface, accent, 0.35)`；判深浅用 `colorScheme.background.luminance()`，**不要用 `isSystemInDarkTheme()`**。
+- **深色配色不能靠压暗浅色底**（十色塌缩成深灰）→ `mix(surface, accent, 0.35)`；判深浅用
+  `colorScheme.background.luminance()`，**不要用 `isSystemInDarkTheme()`**。
 - **周次锚点**：`todayWeek: Int?` 的 **null 绝不兜底成 1**；`anchorFitsTerm` 只比学年 + 半学期。
 - **预检查询只能证伪**：`ChooserActivity` 会吞掉唯一候选（改单候选直投）；不声明 `<queries>` 时查询恒为空，
-  会**反过来谎报**「没有 App 能处理」。
-- **不要自己测自己**：纯逻辑用 Python 独立重算（要建模 Compose 8 位量化）；别用肉眼估截图；
+  反而**谎报**「没有 App 能处理」。
+- **不要自己测自己**：纯逻辑用 Python 独立重算（建模 Compose 8 位量化）；别用肉眼估截图；
   **「只是难看」也要有断言 + 变异探针**。
 - **容器色与内容色必须成对**（`secondaryContainer` 配 `onSecondaryContainer`）—— 配错 = 深底深字/浅底浅字，
-  两个色各自合法 → 编译器与自检都不报，只能静态查（`verify_ui_controls.py` + `probe_ui_controls.sh`）。
-- **M3 四种 chip 全都强制 `onClick`** → 纯陈述型标签用 `StatusTag`。**`ListItem` 内部不撑满宽度** →
-  用它必须自己补 `fillMaxWidth()`，否则点击热区只剩文字。
-- **M3 参数名与属性名会不一致**（`ListItemDefaults.colors()` 是 `supportingColor`）。查真实参数名用
-  `javap -v` 打 `@Metadata` 的 `d2`；`getXxx` 只对应属性、不对应参数名。**`MaterialTheme.shapes` 没被覆盖时
-  就是 M3 baseline**（4/8/12/16/28）→ 写死 `RoundedCornerShape(...)` 换成 `shapes.*` 是零视觉变化的清理。
-- **文本工具脚本的坑**：数 `TabRow(` 会被 `PrimaryTabRow(` 命中 → 名字前加 `(?<![A-Za-z0-9_.])`；跳过
-  `fun X(` 声明；**断言前必须先 `strip_comments()`**。
-- **底部导航栏别按 dump 的 bounds 中心点**（把系统 insets 算进去了）→ 用 **y≈1483**。
+  两色各自合法 → 编译器与自检都不报，只能静态查（`verify_ui_controls.py` + `probe_ui_controls.sh`）。
+- **M3 四种 chip 全都强制 `onClick`** → 陈述型标签用 `StatusTag`。**`ListItem` 内部不撑满宽度** →
+  必须自己补 `fillMaxWidth()`，否则点击热区只剩文字。
+- **M3 参数名与属性名会不一致**（`ListItemDefaults.colors()` 是 `supportingColor`）—— 查真实参数名用
+  `javap -v` 打 `@Metadata` 的 `d2`。**`MaterialTheme.shapes` 未覆盖时就是 M3 baseline**（4/8/12/16/28）。
+- **文本工具脚本**：数 `TabRow(` 会被 `PrimaryTabRow(` 命中 → 名字前加 `(?<![A-Za-z0-9_.])`；跳过 `fun X(`
+  声明；**断言前先 `strip_comments()`**。
+- **底部导航栏别按 dump 的 bounds 中心点**（含系统 insets）→ 用 **y≈1483**。
 - **adb / Git Bash**：`connect` 与命令必须同一次调用（带 `-s 127.0.0.1:7555`）；宿主机用 `10.0.2.2`；
   **Git Bash 没有 `unzip`**（静默失败 → 假通过）；给 Windows 原生 exe 传路径用 `pwd -W`。
-- **UI 清单的写法教训**（5 条里错了 4 条）：grep 只给「出现了什么」，不给「用在什么语义上」，也不看历史。
 - **提交信息/文档里的计数与行号一律现算** —— 写错在提交历史里不可改。
 - **隐私**：学籍接口含身份证/住址/邮编 → 展示脱敏、不落日志、不导出；`tools/out/` 保持 gitignore。

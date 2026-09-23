@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#1565C0</color>
+    <!-- 图标底色，取自 icon.ico 的背景色（2026-09-23 前是 #1565C0 蓝色底 + 白学士帽）。
+         注意这是**图标专用**色，与 ui/theme 里的 colorScheme.background 无关，
+         不参与主题切换 —— 启动图标是品牌资产，不该跟着 App 里的换肤走。 -->
+    <color name="ic_launcher_background">#F0F0F0</color>
 </resources>

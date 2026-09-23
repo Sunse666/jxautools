@@ -1,21 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 学士帽图形。画布 108dp，安全圆仅 66dp（中心 21..87），因此图形全部收在 22..86 内。 -->
+<!-- 启动图标图形层：5×5 方格图案（2026-09-23 起，替换原来的白色学士帽矢量 ——
+     学士帽版本见 git 历史，`git show <旧提交>:app/src/main/res/drawable/ic_launcher_foreground.xml`）。
+
+     来源 = 仓库根 icon.ico，由 tools/make_launcher_icon.py 提取：
+     ① 逐格对账 25/25 与原图一致；
+     ② 该脚本还能从**本文件**反解 pathData 再渲染回 256×256，与原图逐像素比 —— 防止坐标手抄错。
+
+     几何：108dp 画布；图形外接框 18..90 = 72dp —— Android 规范的「可见区域」上限
+     （108dp 画布 / 72dp 可见区 / 66dp 圆安全区，外层 18dp 是留给 launcher 视差动画的）。
+     每格 14.4dp。相邻同列的格已合并成整条矩形，故 8 个矩形覆盖 14 个亮格。
+
+     ⚠️ 外接框别放到 72dp 以上：多出去的部分会被 launcher 的 mask 直接裁掉，看起来就是「图形缺边」。
+        也别缩到 46.7dp 以下 —— 那才是「圆遮罩下绝不切角」的严格内接尺寸，但视觉重量会明显偏轻。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- 帽板 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,36 L86,48 L54,60 L22,48 Z" />
-    <!-- 帽体 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M38,54 L38,66 C38,68 46,74 54,74 C62,74 70,68 70,66 L70,54 L54,60 Z" />
-    <!-- 流苏 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M82,50 L82,68 L86,68 L86,50 Z" />
+        android:fillColor="#26D87B"
+        android:pathData="M18,18 H32.4 V46.8 H18 Z M18,61.2 H32.4 V90 H18 Z M75.6,18 H90 V46.8 H75.6 Z M75.6,61.2 H90 V90 H75.6 Z M46.8,18 H61.2 V32.4 H46.8 Z M32.4,46.8 H46.8 V61.2 H32.4 Z M61.2,46.8 H75.6 V61.2 H61.2 Z M18,75.6 H90 V90 H18 Z" />
 </vector>

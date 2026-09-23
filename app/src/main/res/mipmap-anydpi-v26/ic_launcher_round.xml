@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 自适应图标：background 铺满 108dp，foreground 的图形收在中心 72dp 内。
-     monochrome 只被 Android 13+ 读取；低版本遇到不认识的子标签会忽略，不会报错。
-     round 变体见 ic_launcher_round.xml（内容与本文件相同，清单用 android:roundIcon 指定）。 -->
+<!-- round 变体：供 launcher 显式请求圆形图标时使用（清单里的 android:roundIcon）。
+     内容与 ic_launcher.xml 完全一致 —— 遮罩形状由 launcher 决定，这里不自己「画圆」，
+     否则在方形遮罩的设备上会得到一个圆套方的图标。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

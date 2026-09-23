@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 单色层：供 Android 13+ 的「主题图标」(Material You themed icons) 使用。
+     系统只取本层的 **alpha 通道**，用自己的配色重新着色 —— 所以这里的 fillColor
+     具体是什么颜色、甚至图形原来是绿是红，都不影响结果，真正被用的是形状。
+     几何必须与 ic_launcher_foreground.xml 完全一致，否则开主题图标后图形会「跳」一下。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,18 H32.4 V46.8 H18 Z M18,61.2 H32.4 V90 H18 Z M75.6,18 H90 V46.8 H75.6 Z M75.6,61.2 H90 V90 H75.6 Z M46.8,18 H61.2 V32.4 H46.8 Z M32.4,46.8 H46.8 V61.2 H32.4 Z M61.2,46.8 H75.6 V61.2 H61.2 Z M18,75.6 H90 V90 H18 Z" />
+</vector>
