@@ -766,6 +766,7 @@ private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewMode
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri -> viewModel.onBgPicked(uri) }
+    val bgError by viewModel.bgError.collectAsState()
 
     val bgPath = prefs.timetableBgPath
     val bgFileOk = remember(bgPath) { TimetableBgStore.exists(appContext, bgPath) }
@@ -797,6 +798,14 @@ private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewMode
                 enabled = bgPath != null,
                 modifier = Modifier.weight(1f),
             ) { Text("清除") }
+        }
+        if (bgError != null) {
+            Text(
+                bgError!!,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(6.dp))
         }
         if (bgPath != null && bgFileOk) {
             Spacer(Modifier.height(10.dp))
