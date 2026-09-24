@@ -72,22 +72,25 @@ object TimetableBgStore {
         } catch (_: IllegalArgumentException) {
         }
 
-        // 1) 先探边界：拿不到宽高 = 读不出一张图，直接失败，不留半截文件。
+        // 1) 先探边界：拿不到宽高 = 读不出一张图，不留半截文件。
         //    失败时把诊断上下文一并带出来（openInputStream 返回 null 不抛异常，
         //    异常消息里没有 URI 和 provider 行为就没法排查「为什么读不到」）
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        openImageStream(app, uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: throw readFailure(app, uri)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            throw IllegalStateException("选中的文件不是一张可解码的图片")
-        }
+        val boundsOk = openImageStream(app, uri)?.use {
+            BitmapFactory.decodeStream(it, null, bounds)
+        } != null && bounds.outWidth > 0 && bounds.outHeight > 0
 
-        // 2) 降采样解码：inSampleSize 是 2 的幂，取「还 >= 上限」的最大值
-        val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, MAX_DIMENSION_PX)
-        val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-        val sampled = openImageStream(app, uri)?.use {
-            BitmapFactory.decodeStream(it, null, decodeOpts)
-        } ?: throw IllegalStateException("图片解码失败（读取中断）")
+        // 2) 降采样解码：inSampleSize 是 2 的幂，取「还 >= 上限」的最大值；
+        //    整条流式读取链失败时退到缩略图管道（loadThumbnail 走独立的 binder 入口，
+        //    与 openFile 家族不同路——MuMu 12 实测它是唯一还可能有响应的通道，
+        //    代价是分辨率受限，用作蒙层底图足够）
+        val sampled = if (boundsOk) {
+            val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, MAX_DIMENSION_PX)
+            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+            openImageStream(app, uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+        } else {
+            null
+        } ?: thumbnailFor(app, uri) ?: throw readFailure(app, uri)
 
         // 3) inSampleSize 是粗筛（2 的幂），仍超上限时再精确缩一次（保持长宽比）
         val bitmap = downscaleTo(sampled, MAX_DIMENSION_PX)
@@ -133,6 +136,17 @@ object TimetableBgStore {
                 ?.let { return it.createInputStream() }
         } catch (_: FileNotFoundException) {
         }
+        // 虚拟文档（MuMu 的 documents 把所有条目标 FLAG_VIRTUAL_DOCUMENT）的正规读法是
+        // 带查询到的精确 MIME 再走一次 openTypedAssetFile——通配符 image/* 对虚拟文档
+        // 可能匹配不到任何变换
+        try {
+            val exact = resolver.getType(uri)
+            if (exact != null && exact != "image/*") {
+                resolver.openTypedAssetFileDescriptor(uri, exact, null)
+                    ?.let { return it.createInputStream() }
+            }
+        } catch (_: FileNotFoundException) {
+        }
         // media.documents 的 document id（"image:130"）可以映射成裸 MediaStore URI ——
         // 换一个 provider 入口，有的 ROM 对 documents 门面与裸 URI 的访问检查不一样
         if (uri.authority == "com.android.providers.media.documents") {
@@ -143,6 +157,67 @@ object TimetableBgStore {
                     resolver.openFileDescriptor(direct, "r")?.let { pfd -> return ParcelFileDescriptor.AutoCloseInputStream(pfd) }
                 } catch (_: FileNotFoundException) {
                 }
+            }
+        }
+        // 末端绕行（MuMu 12 实测有效路径）：上面四条 provider 流式入口全被 ROM 的
+        // media 模块静默挡死时，持有 READ_EXTERNAL_STORAGE（≤Android 12）可以退到
+        // `_data` 物理路径直读——FUSE 层按「调用方有没有读权限」放行，
+        // 不经过 openFile 那套 URI 授权检查。Android 13+ 没有这条权限，也不会走到这
+        // （photo picker 正常）。`_data` 在 documents 门面上查不到（被隐藏），
+        // 所以先换算成裸 MediaStore URI 再查。
+        directFileFor(context, uri)?.let { f ->
+            try {
+                return f.inputStream()
+            } catch (_: FileNotFoundException) {
+            } catch (_: SecurityException) {
+            }
+        }
+        return null
+    }
+
+    /**
+     * 缩略图管道兜底：[ContentResolver.loadThumbnail] 与 openFile 家族走不同的 binder 入口
+     * （MediaProvider 的 thumbnail 子系统），是流式读取全灭时最后一条可能通的路。
+     * 返回 null = 这条也不通。API 29+ 才有 loadThumbnail，更早版本直接放弃。
+     */
+    private fun thumbnailFor(context: Context, uri: Uri): android.graphics.Bitmap? {
+        if (android.os.Build.VERSION.SDK_INT < 29) return null
+        return try {
+            context.contentResolver.loadThumbnail(uri, android.util.Size(2048, 2048), null)
+        } catch (e: Exception) {
+            JxauLog.i("底图缩略图管道失败：${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 从 media URI 解析出图片的物理文件（`_data` 列）。解析不到 / 文件不存在返回 null。
+     *
+     * 只做查询不做打开——打开留给调用方统一 catch（FileNotFoundException/SecurityException
+     * 在不同 ROM 上抛哪个不确定，但都该被当成「这条路也不通」）。
+     */
+    private fun directFileFor(context: Context, uri: Uri): File? {
+        val resolver = context.contentResolver
+        val candidates = mutableListOf(uri)
+        if (uri.authority == "com.android.providers.media.documents") {
+            val parts = (uri.lastPathSegment ?: "").split(":")
+            if (parts.size == 2) {
+                candidates += Uri.parse("content://media/external/${parts[0]}s/media/${parts[1]}")
+            }
+        }
+        for (u in candidates) {
+            try {
+                resolver.query(u, arrayOf("_data"), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) {
+                        val idx = c.getColumnIndex("_data")
+                        val path = if (idx >= 0) c.getString(idx) else null
+                        if (path != null) {
+                            val f = File(path)
+                            if (f.isFile) return f
+                        }
+                    }
+                }
+            } catch (_: Exception) {
             }
         }
         return null
@@ -168,6 +243,15 @@ object TimetableBgStore {
             diag.append(" MIME=").append(resolver.getType(uri))
         } catch (e: Exception) {
             diag.append(" MIME探针失败:").append(e.javaClass.simpleName)
+        }
+        // 兜底读权限的状态：末端 _data 直读（directFileFor）只在它为「有」时可能成功，
+        // 四条流式路径全败且这里显示「无」时，提示用户授权才是唯一出路
+        if (android.os.Build.VERSION.SDK_INT <= 32) {
+            try {
+                val read = context.checkSelfPermission("android.permission.READ_EXTERNAL_STORAGE")
+                diag.append(if (read == PackageManager.PERMISSION_GRANTED) " READ=有" else " READ=无")
+            } catch (_: Exception) {
+            }
         }
         try {
             resolver.query(uri, null, null, null, null)?.use { c ->

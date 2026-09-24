@@ -4,6 +4,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!--
+      课表底图的兜底读权限，**仅 Android 12 及以下生效**（maxSdkVersion=32，
+      13+ 的 photo picker 无需任何权限，本条自动消失）。
+      为什么需要：MuMu 12 实测（2026-09-24）photo picker 回落的 DocumentsUI 返回
+      media.documents URI，AMS 授权在、元数据可查，但 MediaProvider 的四条流式
+      读取入口全部静默返回 null（不抛异常）——该 ROM 的 media 模块不认选图授权。
+      持有 READ 权限时可退到 `_data` 物理路径经 FUSE 直读（见 TimetableBgStore
+      的 openImageStream 末端绕行）。正常设备上选图走 picker，永远用不到这条权限。
+    -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!--
       去抢课分支（2026-09-23）移除了这五条权限：
         · FOREGROUND_SERVICE / FOREGROUND_SERVICE_DATA_SYNC / POST_NOTIFICATIONS
           —— 只为 RushService 的前台进度通知而申请，删掉抢课后本工程不再发任何通知

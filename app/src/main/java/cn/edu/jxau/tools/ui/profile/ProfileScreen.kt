@@ -1,5 +1,9 @@
 package cn.edu.jxau.tools.ui.profile
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -768,6 +772,26 @@ private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewMode
     ) { uri -> viewModel.onBgPicked(uri) }
     val bgError by viewModel.bgError.collectAsState()
 
+    // Android 12- 的兜底读权限（MuMu 的 media 模块不认选图授权，读取链末端要靠
+    // _data 物理路径直读，前提是持有 READ_EXTERNAL_STORAGE）。先请求再开 picker，
+    // 拿不到也照开——正常设备根本用不到这条权限，别让它挡路。
+    val launchPicker = {
+        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+    val readPerm = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ -> launchPicker() }
+    val ensureReadThenPick = {
+        if (Build.VERSION.SDK_INT <= 32 &&
+            ContextCompat.checkSelfPermission(appContext, Manifest.permission.READ_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            readPerm.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+        } else {
+            launchPicker()
+        }
+    }
+
     val bgPath = prefs.timetableBgPath
     val bgFileOk = remember(bgPath) { TimetableBgStore.exists(appContext, bgPath) }
 
@@ -788,9 +812,7 @@ private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewMode
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                onClick = {
-                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
+                onClick = ensureReadThenPick,
                 modifier = Modifier.weight(1f),
             ) { Text(if (bgPath == null) "选择图片" else "更换图片") }
             OutlinedButton(
@@ -823,8 +845,9 @@ private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewMode
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "仅课表页显示。图片会复制一份到应用私有目录，不需要相册权限；清除后恢复纯色背景。" +
-                "课程块始终不透明，课名不会压在图片上。",
+            "仅课表页显示。图片会复制一份到应用私有目录，日常使用不需要存储权限；" +
+                "个别系统（如 MuMu 模拟器）选图后读不到图时会请求一次「照片/存储」权限作为兜底。" +
+                "清除后恢复纯色背景。课程块始终不透明，课名不会压在图片上。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
