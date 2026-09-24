@@ -1,5 +1,6 @@
 
 .secrets/
+.workbuddy/
 *.cookie
 cookie*.txt
 local.properties
