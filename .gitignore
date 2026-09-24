@@ -1,4 +1,4 @@
-# === 凭据与隐私（绝不能提交）===
+
 .secrets/
 *.cookie
 cookie*.txt
@@ -6,7 +6,6 @@ local.properties
 *.keystore
 *.jks
 
-# === Android / Gradle 构建产物 ===
 .gradle/
 .kotlin/
 build/
@@ -21,21 +20,16 @@ captures/
 output.json
 release/
 
-# === 本地临时产物（截图 / dump / 抓取结果，随手可重现，不入库）===
 tools/out/
 out/
-# 真机验证截图直接落在 tools/ 下（tools/out/ 放 mock 演练产物），同样不入库。
-# 需要留档的设计稿或参照图用 `git add -f` 显式加。
 tools/*.png
 *.pyc
 
-# === IDE / 工具 ===
 .idea/
 *.iml
 .vscode/
 *.hprof
 
-# === 系统 ===
 .DS_Store
 Thumbs.db
 __pycache__/
