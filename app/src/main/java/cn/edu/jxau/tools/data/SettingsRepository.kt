@@ -9,6 +9,7 @@ import cn.edu.jxau.tools.data.model.FontFamilyOption
 import cn.edu.jxau.tools.data.model.FontScale
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
+import cn.edu.jxau.tools.data.model.TimetableBgSpec
 import cn.edu.jxau.tools.data.model.TimetableSize
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +70,23 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
     /** 恢复默认尺寸（不影响主题） */
     fun resetTimetableSize() = mutate { it.copy(timetableSize = TimetableSize.DEFAULT) }
 
+    // ---------- 课表底图 ----------
+
+    /**
+     * 写入底图文件路径（`TimetableBgStore` 拷贝完成后的新路径）。
+     *
+     * 只改路径**不动浓度**：换一张图不该把用户调好的蒙层浓度一起重置
+     * （与 [customAccent] 在切换预设时保留参数是同一条决策）。
+     * 传 null = 清除底图，**只由「清除」按钮调用**；删文件是调用方的事，
+     * 这里只管偏好（先改偏好再删文件，反过来崩溃会留下「路径在、文件没了」的悬空状态）。
+     */
+    fun setTimetableBg(path: String?) =
+        mutate { it.copy(timetableBgPath = path?.trim()?.takeIf(String::isNotEmpty)) }
+
+    /** 蒙层浓度。滑块拖动时每帧调用，内部吸附一次，不让非法值进模型 */
+    fun setTimetableBgDim(dim: Int) =
+        mutate { it.copy(timetableBgDim = TimetableBgSpec.snapDim(dim)) }
+
     // ---------- 周次锚点 ----------
 
     /**
@@ -127,6 +145,15 @@ class SettingsRepository private constructor(private val store: SettingsStore) {
                 JxauLog.i(
                     "课表尺寸已更新：格子高 ${next.timetableSize.periodHeightDp}dp、" +
                         "列宽 ${next.timetableSize.columnWidthDp}dp、课名 ${next.timetableSize.nameFontSp}sp"
+                )
+            next.timetableBgPath != current.timetableBgPath ->
+                // 换图/清除是低频动作，值得留痕；浓度滑块每帧都变，**不给它日志分支**
+                // （同 customAccent 的先例），否则拖一次滑块刷几百行日志。
+                JxauLog.i(
+                    when (next.timetableBgPath) {
+                        null -> "课表底图已清除（原：${current.timetableBgPath}）"
+                        else -> "课表底图已更新：${next.timetableBgPath}（浓度 ${next.timetableBgDim}%）"
+                    }
                 )
             // ⚠️ 刻意**没有** customAccent 的分支：色相滑块拖动时它每帧都变，
             // 给它一条日志就等于把日志刷爆，而「即时生效」正是靠日志验收的。

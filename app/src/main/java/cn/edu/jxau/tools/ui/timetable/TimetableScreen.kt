@@ -1,5 +1,7 @@
 package cn.edu.jxau.tools.ui.timetable
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,13 +33,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -45,12 +52,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.data.SettingsRepository
+import cn.edu.jxau.tools.data.TimetableBgStore
 import cn.edu.jxau.tools.data.model.CourseSlot
 import cn.edu.jxau.tools.data.model.LessonGrid
 import cn.edu.jxau.tools.data.model.WeekMath
 import cn.edu.jxau.tools.data.model.WeekParser
 import cn.edu.jxau.tools.ui.MotionSwap
 import cn.edu.jxau.tools.ui.motionPhase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val TIGHT_PADDING = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
@@ -66,81 +76,113 @@ fun TimetableScreen(viewModel: TimetableViewModel = viewModel()) {
 
     LaunchedEffect(Unit) { viewModel.load() }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Header(state = state, onGotoToday = viewModel::gotoToday, onSelectTerm = viewModel::selectTerm)
+    // 底图位图状态提到这一层：它同时决定两件事——图/蒙层画不画（下面）、
+    // WeekTable 的底纹要不要切半透明变体（imageMode）。两处必须同源，
+    // 拆开就会出现「图显示了但格子不透明」或「格子透明了图却没加载出来」。
+    val bgBitmap = rememberBgBitmap(prefs.timetableBgPath)
 
-        // ⚠️ 这层 `Box(weight(1f))` 不能省（与成绩页同一个理由）：`MotionSwap` 内部的
-        // `AnimatedContent` 是普通 Box，拿不到 `ColumnScope`，里面的内容就没有 `weight` 可用。
-        // 把「表头以下的剩余空间」在这里显式框出来，里面一律 `fillMaxSize()` —— 免得去赌
-        // 「非 weight 子项拿到的最大高度是整页还是剩余」（赌错的表现是课表整体多出一个表头的高度、
-        // 最后两节被底部导航盖住；能编译、能滚、看不出是布局错了）。
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-        ) {
-            MotionSwap(
-                target = motionPhase(
-                    state.phase,
-                    TimetableUiState.Phase.Idle,
-                    TimetableUiState.Phase.Loading,
-                ),
-                label = "课表内容",
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (bgBitmap != null) {
+            Image(
+                bitmap = bgBitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
-            ) { phase ->
-                when (phase) {
-                    TimetableUiState.Phase.Idle, TimetableUiState.Phase.Loading -> CenterBox {
-                        CircularProgressIndicator(modifier = Modifier.size(30.dp))
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            state.message.ifBlank { "正在读取课表…" },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
+            )
+            // 蒙层夹在图和内容之间：表头 / 节次轴 / 周次条这些直接压在图上的文字，
+            // 可读性全靠它。浓度语义（大 = 蒙层实 = 图淡）见 TimetableBgSpec，
+            // 方向有断言钉着，别凭肉眼校。
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        TimetableSurface.scrimColor(
+                            MaterialTheme.colorScheme.background,
+                            prefs.timetableBgDim,
+                        ),
+                    ),
+            )
+        }
 
-                    TimetableUiState.Phase.Failed -> CenterBox {
-                        Text(
-                            state.message.ifBlank { "读取失败" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 24.dp),
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
-                    }
+        Column(modifier = Modifier.fillMaxSize()) {
+            Header(state = state, onGotoToday = viewModel::gotoToday, onSelectTerm = viewModel::selectTerm)
 
-                    TimetableUiState.Phase.Ready -> {
-                        val grid = state.grid
-                        if (grid == null || grid.periodCount <= 0) {
-                            CenterBox {
-                                Text(
-                                    state.message.ifBlank { "这个学期没有课程。" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 24.dp),
-                                )
-                                Spacer(Modifier.height(12.dp))
-                                TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
-                            }
-                        } else {
-                            // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排，
-                            // 否则警示卡 / 周次条 / 课表会全叠在同一块地方
-                            Column(modifier = Modifier.fillMaxSize()) {
-                                DataWarnings(grid, state.anchorReliable, state.anchorLine)
-                                WeekBar(
-                                    state = state,
-                                    onPrev = { viewModel.goWeek(-1) },
-                                    onNext = { viewModel.goWeek(1) },
-                                )
-                                WeekTable(
-                                    grid = grid,
-                                    week = state.week,
-                                    todayWeek = state.todayWeek,
-                                    size = prefs.timetableSize,
-                                    onPick = viewModel::showDetail,
-                                    modifier = Modifier.weight(1f),
-                                )
+            // ⚠️ 这层 `Box(weight(1f))` 不能省（与成绩页同一个理由）：`MotionSwap` 内部的
+            // `AnimatedContent` 是普通 Box，拿不到 `ColumnScope`，里面的内容就没有 `weight` 可用。
+            // 把「表头以下的剩余空间」在这里显式框出来，里面一律 `fillMaxSize()` —— 免得去赌
+            // 「非 weight 子项拿到的最大高度是整页还是剩余」（赌错的表现是课表整体多出一个表头的高度、
+            // 最后两节被底部导航盖住；能编译、能滚、看不出是布局错了）。
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                MotionSwap(
+                    target = motionPhase(
+                        state.phase,
+                        TimetableUiState.Phase.Idle,
+                        TimetableUiState.Phase.Loading,
+                    ),
+                    label = "课表内容",
+                    modifier = Modifier.fillMaxSize(),
+                ) { phase ->
+                    when (phase) {
+                        TimetableUiState.Phase.Idle, TimetableUiState.Phase.Loading -> CenterBox {
+                            CircularProgressIndicator(modifier = Modifier.size(30.dp))
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                state.message.ifBlank { "正在读取课表…" },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+
+                        TimetableUiState.Phase.Failed -> CenterBox {
+                            Text(
+                                state.message.ifBlank { "读取失败" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 24.dp),
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = { viewModel.load(force = true) }) { Text("重试") }
+                        }
+
+                        TimetableUiState.Phase.Ready -> {
+                            val grid = state.grid
+                            if (grid == null || grid.periodCount <= 0) {
+                                CenterBox {
+                                    Text(
+                                        state.message.ifBlank { "这个学期没有课程。" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 24.dp),
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    TextButton(onClick = { viewModel.load(force = true) }) { Text("重新加载") }
+                                }
+                            } else {
+                                // `AnimatedContent` 的内容是 Box（叠放）语义，多项内容必须自己竖排，
+                                // 否则警示卡 / 周次条 / 课表会全叠在同一块地方
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    DataWarnings(grid, state.anchorReliable, state.anchorLine)
+                                    WeekBar(
+                                        state = state,
+                                        onPrev = { viewModel.goWeek(-1) },
+                                        onNext = { viewModel.goWeek(1) },
+                                    )
+                                    WeekTable(
+                                        grid = grid,
+                                        week = state.week,
+                                        todayWeek = state.todayWeek,
+                                        size = prefs.timetableSize,
+                                        onPick = viewModel::showDetail,
+                                        modifier = Modifier.weight(1f),
+                                        // 只有图真正加载成功才切半透明底纹：图没加载出来时切的话，
+                                        // 半透明格子叠在纯背景上等于没画格子，行结构只剩一条描边
+                                        imageMode = bgBitmap != null,
+                                    )
+                                }
                             }
                         }
                     }
@@ -152,6 +194,29 @@ fun TimetableScreen(viewModel: TimetableViewModel = viewModel()) {
     if (state.detail.isNotEmpty()) {
         CourseDetailSheet(courses = state.detail, onDismiss = viewModel::hideDetail)
     }
+}
+
+/**
+ * 底图位图：`remember(path)` 语义的 IO 解码（[produceState]）。
+ *
+ * - **path 变了才重解码**——拖浓度滑块不会触发（dim 不参与键），解码是本页最贵的动作；
+ * - 解码在 `Dispatchers.IO`，主线程零图片处理；
+ * - 读不到 / 解不开返回 null（`TimetableBgStore.decodeForDisplay` 里已记 `[E]` 日志），
+ *   渲染端按「无底图」兜底：图与蒙层都不画，底纹自动回到不透明变体——
+ *   不会出现「图丢了、半透明格子叠在纯背景上等于没画」的中间态。
+ */
+@Composable
+private fun rememberBgBitmap(path: String?): ImageBitmap? {
+    val appContext = LocalContext.current.applicationContext
+    return produceState<ImageBitmap?>(initialValue = null, key1 = path) {
+        if (path == null) {
+            value = null
+        } else {
+            value = withContext(Dispatchers.IO) {
+                TimetableBgStore.decodeForDisplay(appContext, path)?.asImageBitmap()
+            }
+        }
+    }.value
 }
 
 // ---------- 顶部 ----------

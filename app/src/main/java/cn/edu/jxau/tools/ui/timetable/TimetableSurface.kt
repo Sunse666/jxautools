@@ -1,6 +1,9 @@
 package cn.edu.jxau.tools.ui.timetable
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
+import cn.edu.jxau.tools.data.model.TimetableBgSpec
 import cn.edu.jxau.tools.ui.theme.ColorThemeSpec
 import cn.edu.jxau.tools.ui.theme.JxauPalette
 import cn.edu.jxau.tools.ui.theme.mixColors
@@ -52,6 +55,40 @@ object TimetableSurface {
         stripes(JxauPalette.LightBackground, JxauPalette.LightSurfaceVariant, JxauPalette.LightOutline)
     }
 
+    /**
+     * 底图模式的底纹：格子从「不透明混色」改成**半透明 background**，图才能从格子后面透出来。
+     *
+     * ## 这个变体为什么必须存在
+     * 无底图时的底纹是不透明色——底图模式下直接沿用的话，整个网格区域会被盖得严严实实，
+     * 表现是「开了底图但格子全是色块」：功能等于没开，还不崩不报错。这是本功能
+     * 的头号静默失效（见 `docs/自定义底图功能实施大纲.md` §3），所以两档 alpha 与
+     * 「图模式必须半透明」都以断言钉死在 [selfTest] 里，包括把旧的不透明行为
+     * 固化成必 FAIL 的变异探针。
+     *
+     * 比例的含义与无图版一致：偶数行比奇数行实（交替可辨），描边最显眼
+     * （「这是哪一节」主要靠它）。课程块**不参与**这套半透明——保持不透明，
+     * 块上文字对比度才不受图影响，这是「仅课表页」方案可读性的根基。
+     */
+    const val IMAGE_ODD_ROW_ALPHA = 0.30f
+    const val IMAGE_EVEN_ROW_ALPHA = 0.60f
+
+    fun stripesForImage(background: Color, outline: Color): StripeColors = StripeColors(
+        oddRow = background.copy(alpha = IMAGE_ODD_ROW_ALPHA),
+        evenRow = background.copy(alpha = IMAGE_EVEN_ROW_ALPHA),
+        // 描边维持无图版的不透明混色：行边界是图模式下唯一「实」的结构线，该显眼就显眼
+        border = mix(background, outline, BORDER_MIX),
+    )
+
+    /**
+     * 底图蒙层：`background.copy(alpha = 浓度/100)`。
+     *
+     * 颜色取当前主题 background（随深浅模式自动适配），浓度语义与方向见
+     * [TimetableBgSpec.scrimAlpha]——那边的方向断言管「公式对不对」，
+     * 这里的合成断言管「用户看到的效果对不对」。
+     */
+    fun scrimColor(background: Color, dim: Int): Color =
+        background.copy(alpha = TimetableBgSpec.scrimAlpha(dim))
+
     /** 线性插值：t=0 取 a，t=1 取 b。实现收敛在 [cn.edu.jxau.tools.ui.theme.mixColors]（唯一一份） */
     fun mix(a: Color, b: Color, t: Float): Color = mixColors(a, b, t)
 
@@ -93,6 +130,66 @@ object TimetableSurface {
             val tag = if (dark) "深色" else "浅色"
             val bg = JxauPalette.backgroundFor(dark)
             checkInt("变异探针（$tag 旧实现奇数行=背景）", ColorThemeSpec.contrastRatio(bg, bg), 1000, 1000, out)
+        }
+
+        // ---- 底图模式：半透明底纹 ----
+        for (dark in listOf(false, true)) {
+            val tag = if (dark) "深色" else "浅色"
+            val bg = JxauPalette.backgroundFor(dark)
+            val outline = if (dark) JxauPalette.DarkOutline else JxauPalette.LightOutline
+            val s = stripesForImage(bg, outline)
+            out += if (s.oddRow.alpha == IMAGE_ODD_ROW_ALPHA && s.evenRow.alpha == IMAGE_EVEN_ROW_ALPHA) {
+                "PASS $tag 图模式两档底色 alpha 与常量一致"
+            } else {
+                "FAIL $tag 图模式底色 alpha 与常量不一致（改常量没同步断言）"
+            }
+            out += if (s.oddRow.alpha < 1f && s.evenRow.alpha < 1f) {
+                "PASS $tag 图模式底纹半透明（图能透出）"
+            } else {
+                "FAIL $tag 图模式底纹不透明（底图会被格子盖死）"
+            }
+            out += if (s.evenRow.alpha > s.oddRow.alpha) {
+                "PASS $tag 图模式偶数行比奇数行实（交替仍可辨）"
+            } else {
+                "FAIL $tag 图模式两档底色不可辨"
+            }
+        }
+
+        // ---- 底图蒙层方向 ----
+        // 固定两张假想图（全黑 / 全白，覆盖「图比背景亮」与「比背景暗」两种极端），
+        // 浓度沿档位表单调增时，合成色（蒙层压在图上）到背景的距离必须单调不增 ——
+        // 即「往浓拖，图越来越淡」。公式（alpha = dim/100）写反了这里必 FAIL。
+        for (dark in listOf(false, true)) {
+            val tag = if (dark) "深色" else "浅色"
+            val bg = JxauPalette.backgroundFor(dark)
+            for (image in listOf(Color.Black, Color.White)) {
+                val imageKind = if (image == Color.Black) "暗图" else "亮图"
+                var prevDist = -1f
+                var monotonic = true
+                for (dim in TimetableBgSpec.DIM_LEVELS) {
+                    val blended = scrimColor(bg, dim).compositeOver(image)
+                    val dist = kotlin.math.abs(blended.luminance() - bg.luminance())
+                    if (prevDist >= 0f && dist > prevDist + 1e-4f) monotonic = false
+                    prevDist = dist
+                }
+                out += if (monotonic) {
+                    "PASS $tag 蒙层方向（$imageKind 浓度↑→合成色逼近背景）"
+                } else {
+                    "FAIL $tag 蒙层方向反了：浓度增大 $imageKind 反而更清楚"
+                }
+            }
+        }
+
+        // ---- 变异探针：不透明底纹必须被判为「图模式不合格」----
+        // 证明上面「半透明」断言真有判别力（不是恒过）：无图版的底纹 alpha 恒为 1，
+        // 若它能在图模式下通过半透明检查，这组断言等于没写。
+        for (dark in listOf(false, true)) {
+            val legacyAlpha = stripesFor(dark).oddRow.alpha
+            out += if (legacyAlpha < 1f) {
+                "FAIL 变异探针（${if (dark) "深" else "浅"}色）旧版不透明底纹被放行"
+            } else {
+                "PASS 变异探针（${if (dark) "深" else "浅"}色）旧版不透明底纹被判不合格"
+            }
         }
 
         return out

@@ -1,11 +1,13 @@
 package cn.edu.jxau.tools.ui.profile
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.data.SessionRepository
 import cn.edu.jxau.tools.data.SettingsRepository
+import cn.edu.jxau.tools.data.TimetableBgStore
 import cn.edu.jxau.tools.data.model.ColorTheme
 import cn.edu.jxau.tools.data.model.CustomAccent
 import cn.edu.jxau.tools.data.model.FontFamilyOption
@@ -117,6 +119,38 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
         setColumnWidthDp(settings.prefs.value.timetableSize.columnWidthDp + delta)
 
     fun resetTimetableSize() = settings.resetTimetableSize()
+
+    // ---------- 课表底图 ----------
+
+    /**
+     * photo picker 的回调。拷贝 / 降采样 / 原子替换在 IO 线程做，失败给日志不给崩溃。
+     *
+     * 顺序是保命的：**写新文件 → 改偏好 → 删旧文件**。反过来任意一步崩溃都会丢图，
+     * 或留下「路径在、文件没了」的悬空状态（见 [TimetableBgStore] 文件头）。
+     */
+    fun onBgPicked(uri: Uri?) {
+        if (uri == null) return
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val old = settings.prefs.value.timetableBgPath
+            try {
+                val newPath = TimetableBgStore.saveFromUri(app, uri)
+                settings.setTimetableBg(newPath)
+                if (old != null && old != newPath) TimetableBgStore.deleteQuietly(old)
+            } catch (e: Exception) {
+                JxauLog.e("底图保存失败：${e.message}")
+            }
+        }
+    }
+
+    /** 清除底图：先改偏好再删文件，浓度保留（换图不该连用户调好的浓度一起重置） */
+    fun clearBg() {
+        val old = settings.prefs.value.timetableBgPath
+        settings.setTimetableBg(null)
+        TimetableBgStore.deleteQuietly(old)
+    }
+
+    fun setTimetableBgDim(dim: Int) = settings.setTimetableBgDim(dim)
 
     // ---------- 周次校准 ----------
 

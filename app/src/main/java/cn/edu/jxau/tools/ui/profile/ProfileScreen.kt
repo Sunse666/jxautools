@@ -1,6 +1,9 @@
 package cn.edu.jxau.tools.ui.profile
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -68,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -75,6 +79,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.edu.jxau.tools.core.JxauLog
 import cn.edu.jxau.tools.core.SelfTest
+import cn.edu.jxau.tools.data.TimetableBgStore
+import cn.edu.jxau.tools.data.model.AppPreferences
 import cn.edu.jxau.tools.data.model.Channel
 import cn.edu.jxau.tools.data.model.ColorTheme
 import cn.edu.jxau.tools.data.model.CourseSlot
@@ -83,6 +89,7 @@ import cn.edu.jxau.tools.data.model.FontFamilyOption
 import cn.edu.jxau.tools.data.model.FontScale
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
+import cn.edu.jxau.tools.data.model.TimetableBgSpec
 import cn.edu.jxau.tools.data.model.TimetableGrid
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 import cn.edu.jxau.tools.data.model.WeekMath
@@ -518,6 +525,8 @@ private fun AppearancePage(viewModel: ProfileViewModel, onBack: () -> Unit) {
             onSaturation = viewModel::setCustomSaturation,
         )
 
+        TimetableBgSection(prefs = prefs, viewModel = viewModel)
+
         SectionCard("当前状态") {
             InfoRow("配色模式", prefs.themeMode.label)
             InfoRow(
@@ -739,6 +748,80 @@ private fun CustomHueSection(
     }
 }
 
+/**
+ * 课表底图节：摘要 + 选图/更换/清除 + 浓度滑块。
+ *
+ * ## 为什么摘要要区分「已设置」和「文件丢失」
+ * 偏好里存的是文件路径，文件可能被系统清理工具删掉或备份恢复时丢失（渲染端会静默降级、
+ * 不崩不报错）。这条路径上唯一的可见痕迹就在这里——摘要显示「底图文件丢失（重选一张即可恢复）」
+ * 并用错误色，把「悄悄失效」变成「看得见的待办」。判定用 [TimetableBgStore.exists]，
+ * `remember(bgPath)` 缓存：一次 stat 很便宜，但也不该每次重组都做。
+ *
+ * ## 为什么浓度滑块只在已设置时出现
+ * 没有图时浓度没有任何效果，摆出来就是「调了没反应」的假控件。
+ */
+@Composable
+private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewModel) {
+    val appContext = LocalContext.current.applicationContext
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> viewModel.onBgPicked(uri) }
+
+    val bgPath = prefs.timetableBgPath
+    val bgFileOk = remember(bgPath) { TimetableBgStore.exists(appContext, bgPath) }
+
+    SectionCard("课表底图") {
+        Text(
+            when {
+                bgPath == null -> "关闭"
+                !bgFileOk -> "底图文件丢失（重选一张即可恢复）"
+                else -> "已设置 · 浓度 ${prefs.timetableBgDim}%"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (bgPath != null && !bgFileOk) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text(if (bgPath == null) "选择图片" else "更换图片") }
+            OutlinedButton(
+                onClick = viewModel::clearBg,
+                enabled = bgPath != null,
+                modifier = Modifier.weight(1f),
+            ) { Text("清除") }
+        }
+        if (bgPath != null && bgFileOk) {
+            Spacer(Modifier.height(10.dp))
+            StepSlider(
+                title = "蒙层浓度",
+                value = prefs.timetableBgDim,
+                range = TimetableBgSpec.MIN_DIM..TimetableBgSpec.MAX_DIM,
+                endLabels = listOf("淡（图清晰）", "浓（图很淡）"),
+                step = TimetableBgSpec.DIM_STEP,
+                unit = "%",
+                snap = TimetableBgSpec::snapDim,
+                onChange = viewModel::setTimetableBgDim,
+                onNudge = { delta -> viewModel.setTimetableBgDim(prefs.timetableBgDim + delta) },
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "仅课表页显示。图片会复制一份到应用私有目录，不需要相册权限；清除后恢复纯色背景。" +
+                "课程块始终不透明，课名不会压在图片上。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 // ---------- 子页：字体 ----------
 
 @Composable
@@ -914,6 +997,8 @@ private fun StepSlider(
     snap: (Int) -> Int,
     onChange: (Int) -> Unit,
     onNudge: (Int) -> Unit,
+    /** 数值单位。默认 dp（尺寸滑块），浓度滑块传 % */
+    unit: String = "dp",
 ) {
     Column {
         Row(
@@ -922,7 +1007,7 @@ private fun StepSlider(
         ) {
             Text(title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             Text(
-                "$value dp",
+                "$value$unit",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium,

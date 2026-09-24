@@ -74,6 +74,10 @@ private val ZEBRA_SHAPE = RoundedCornerShape(6.dp)
  *
  * @param onPick 点课程块的回调。传 null = 只读预览（「我的」页的尺寸预览就是这种），
  *   此时块不可点，避免出现「点了没反应」的假交互。
+ * @param imageMode 底图模式：空格底纹换用半透明变体（[TimetableSurface.stripesForImage]），
+ *   底图才能从格子后面透出来。**只在「底图确实加载成功」时传 true**——图没加载出来
+ *   （没设置/文件丢失/还在解码）就传 true 的话，半透明底纹叠在纯色背景上等于没画格子，
+ *   行结构只剩描边一条线。默认 false，旧调用点（设置页预览）零改动。
  */
 @Composable
 internal fun WeekTable(
@@ -84,6 +88,7 @@ internal fun WeekTable(
     size: TimetableSize,
     modifier: Modifier = Modifier,
     onPick: ((List<CourseSlot>) -> Unit)? = null,
+    imageMode: Boolean = false,
 ) {
     val todayColumn = if (todayWeek != null && week == todayWeek) LocalDate.now().dayOfWeek.value else 0
     // 表头与网格**共用同一个横向滚动状态**：一个是列标题、一个是列内容，
@@ -162,6 +167,7 @@ internal fun WeekTable(
                         periodCount = grid.periodCount,
                         size = size,
                         onPick = onPick,
+                        imageMode = imageMode,
                         modifier = Modifier.width(size.columnWidthDp.dp),
                     )
                     if (weekday < 7) Spacer(Modifier.width(TimetableSizeSpec.COLUMN_GAP.dp))
@@ -227,15 +233,22 @@ private fun DayColumn(
     size: TimetableSize,
     onPick: ((List<CourseSlot>) -> Unit)?,
     modifier: Modifier = Modifier,
+    imageMode: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
-    // 底纹只由三个中性色决定（不随主题色相变），按这三个颜色缓存，避免每列每帧重算
-    val stripes = remember(scheme.background, scheme.surfaceVariant, scheme.outline) {
-        TimetableSurface.stripes(
-            background = scheme.background,
-            surfaceVariant = scheme.surfaceVariant,
-            outline = scheme.outline,
-        )
+    // 底纹只由三个中性色决定（不随主题色相变），按这三个颜色缓存，避免每列每帧重算。
+    // imageMode 参与键：开关切换时底纹要从「不透明混色」换成「半透明变体」，漏了它
+    // 就会出现「选了底图但格子还是不透明」——恰好是需要防的那个静默失效。
+    val stripes = remember(scheme.background, scheme.surfaceVariant, scheme.outline, imageMode) {
+        if (imageMode) {
+            TimetableSurface.stripesForImage(scheme.background, scheme.outline)
+        } else {
+            TimetableSurface.stripes(
+                background = scheme.background,
+                surfaceVariant = scheme.surfaceVariant,
+                outline = scheme.outline,
+            )
+        }
     }
     val inset = TimetableSizeSpec.CELL_INSET_DP.dp
 

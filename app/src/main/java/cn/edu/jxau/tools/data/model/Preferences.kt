@@ -632,6 +632,103 @@ data class TimetableSize(
     }
 }
 
+/**
+ * 课表底图的蒙层浓度档位。
+ *
+ * ## 为什么只有「浓度」一个可调项
+ * 底图上文字可读性全靠蒙层兜底——课程块不透明，真正压在图上的只有表头、节次轴与空格底纹。
+ * 一个维度（浓度）就能保证任何图都可用；模糊/全局底图这类扩展在需求上被明确砍掉
+ * （见 `docs/自定义底图功能实施大纲.md` §0）。
+ *
+ * ## 为什么浓度分 5% 网格而不是连续值
+ * 与 [TimetableSizeSpec] 的 2dp 网格同一套理由：1% 的差别肉眼分不出，只会让档位翻倍。
+ * 5% 一档共 13 档，「淡了/浓了」的每一步都有感知。
+ *
+ * ## 浓度语义（改这里前先读）
+ * **浓度 = 蒙层不透明度**：[dim] 越大 → 蒙层越实 → 图越看不见。30 = 图最透，
+ * 90 = 图几乎只剩个影子。下限 30 而不是 0：全透的图上表头文字可读性靠运气，
+ * 压到 30 是「还能看出是哪张图」与「文字还能读」的折中。
+ *
+ * 存的是浓度本身而不是最终的 alpha：蒙层颜色是当前主题的 background（随深浅模式变），
+ * 派生规则可演进，存用户的选择永远有效 —— 与 [CustomAccent] 存「色相+饱和度档」同理。
+ */
+object TimetableBgSpec {
+    const val MIN_DIM = 30
+    const val MAX_DIM = 90
+    const val DIM_STEP = 5
+    const val DEFAULT_DIM = 60
+
+    /** 浓度档位表：30..90 步长 5，共 13 档 */
+    val DIM_LEVELS: List<Int> = (MIN_DIM..MAX_DIM step DIM_STEP).toList()
+
+    /**
+     * 浓度 → 蒙层不透明度（0..1）。
+     *
+     * ⚠️ 方向极容易写反：**alpha = 浓度 / 100**（浓度大 = 蒙层实 = 图更淡）。
+     * 写反的表现是「往浓拖，图反而更清楚」，且编译器与界面都不报错 ——
+     * 方向由 [TimetableSurface.selfTest] 的合成方向断言钉死，别只靠肉眼。
+     */
+    fun scrimAlpha(dim: Int): Float = snapDim(dim) / 100f
+
+    /**
+     * 把任意整数吸附到浓度档位。
+     *
+     * 与 [TimetableSizeSpec.snap] 同一套语义：先夹进区间、再向下对齐 5% 网格，
+     * 距两档一样远时取较小档（滑动不抖）。存储里的值可能来自旧版本或被手改过，
+     * 读入与写入两侧都过一遍吸附，不让非法值进模型。
+     */
+    fun snapDim(value: Int): Int {
+        val clamped = value.coerceIn(MIN_DIM, MAX_DIM)
+        return MIN_DIM + (clamped - MIN_DIM) / DIM_STEP * DIM_STEP
+    }
+
+    private fun check(name: String, actual: Any?, expected: Any?, out: MutableList<String>) {
+        out += if (actual == expected) "PASS $name = $actual"
+        else "FAIL $name：期望 $expected，实际 $actual"
+    }
+
+    /** 期望值由 tools/verify_preferences.py 独立重算后抄入，不是把实现结果回填 */
+    fun selfTest(): List<String> {
+        val out = mutableListOf<String>()
+
+        // ---- 档位表：范围与步长 ----
+        check("浓度档位数", DIM_LEVELS.size, 13, out)
+        check("浓度档位下限", DIM_LEVELS.first(), MIN_DIM, out)
+        check("浓度档位上限", DIM_LEVELS.last(), MAX_DIM, out)
+        check("浓度档位等步长", DIM_LEVELS.zipWithNext().all { (a, b) -> b - a == DIM_STEP }, true, out)
+        check("默认浓度在档位表内", DEFAULT_DIM in DIM_LEVELS, true, out)
+
+        // ---- 吸附：夹取 + 对齐 5% 网格 ----
+        check("snapDim(60)", snapDim(60), 60, out)
+        check("snapDim(30) 下限保留", snapDim(30), 30, out)
+        check("snapDim(90) 上限保留", snapDim(90), 90, out)
+        check("snapDim(29) 夹下限", snapDim(29), 30, out)
+        check("snapDim(91) 夹上限", snapDim(91), 90, out)
+        check("snapDim(0) 夹下限", snapDim(0), 30, out)
+        check("snapDim(5000) 夹上限", snapDim(5000), 90, out)
+        check("snapDim(-5) 夹下限", snapDim(-5), 30, out)
+        check("snapDim(47) 对齐网格", snapDim(47), 45, out)
+        check("snapDim(62) 中点取小", snapDim(62), 60, out)
+        check("snapDim(63) 已对齐", snapDim(63) in DIM_LEVELS, true, out)
+        check("snapDim(63) 具体值", snapDim(63), 60, out)
+        // 吸附结果必须落在档位表里（网格与档位表是同一份定义，这条防它们走偏）
+        check(
+            "任意值吸附后都在档位表内",
+            (-50..200 step 7).map { snapDim(it) }.all { it in DIM_LEVELS },
+            true, out,
+        )
+
+        // ---- 蒙层方向（纯函数侧）----
+        // alpha 随浓度单调不减，且恒在 [0.3, 0.9]：拖向「浓」图只会更淡，不会反向。
+        check("scrimAlpha(30)", scrimAlpha(30), 0.30f, out)
+        check("scrimAlpha(60)", scrimAlpha(60), 0.60f, out)
+        check("scrimAlpha(90)", scrimAlpha(90), 0.90f, out)
+        check("scrimAlpha 单调不减", DIM_LEVELS.map { scrimAlpha(it) }.zipWithNext().all { (a, b) -> a <= b }, true, out)
+
+        return out
+    }
+}
+
 /** 本地偏好总集。字段少，用不可变 data class 整体替换，避免半更新状态 */
 data class AppPreferences(
     val themeMode: ThemeMode = ThemeMode.DEFAULT,
@@ -645,6 +742,22 @@ data class AppPreferences(
     val fontScale: FontScale = FontScale.DEFAULT,
     val fontFamily: FontFamilyOption = FontFamilyOption.DEFAULT,
     val timetableSize: TimetableSize = TimetableSize.DEFAULT,
+    /**
+     * 课表底图文件路径（`filesDir` 内的绝对路径）。null = 未启用底图。
+     *
+     * **存路径而不是 content URI**：photo picker 返回的 URI 授权随进程结束失效，
+     * 不拷贝的话「重启后底图凭空消失」——拷贝进应用私有目录后存路径，读取不依赖任何授权。
+     * 文件读不到时的容错见 `TimetableBgStore` / 渲染端：按「无底图」显示并记日志，不清这里的值
+     * （自动清会把「临时读不到」升级成「设置凭空消失」）。
+     */
+    val timetableBgPath: String? = null,
+    /**
+     * 底图蒙层浓度（30..90，5% 网格吸附值），语义与方向见 [TimetableBgSpec]。
+     *
+     * 与 [customAccent] 同一条决策：**清除底图时保留浓度**——用户换个图还要重新拖滑块的话，
+     * 「清除」就从「撤掉这张图」变成了「重置整套设置」。
+     */
+    val timetableBgDim: Int = TimetableBgSpec.DEFAULT_DIM,
     /**
      * 「第一周周一」锚点，用来把今天换算成第几周。
      *

@@ -8,6 +8,7 @@ import cn.edu.jxau.tools.data.model.FontFamilyOption
 import cn.edu.jxau.tools.data.model.FontScale
 import cn.edu.jxau.tools.data.model.TermAnchor
 import cn.edu.jxau.tools.data.model.ThemeMode
+import cn.edu.jxau.tools.data.model.TimetableBgSpec
 import cn.edu.jxau.tools.data.model.TimetableSize
 import cn.edu.jxau.tools.data.model.TimetableSizeSpec
 
@@ -37,6 +38,12 @@ class SettingsStore(context: Context) {
             fontFamily = FontFamilyOption.ofKey(prefs.getString(KEY_FONT_FAMILY, null)),
             // 走 fromStored：存量值可能不是当前档位（旧版本 / 被手改过），这里统一吸附
             timetableSize = TimetableSize.fromStored(height, width),
+            // 路径直接读：有效性（文件还在不在）由渲染端与设置页兜，存储层只管存取
+            timetableBgPath = prefs.getString(KEY_TIMETABLE_BG, null),
+            // 走 snapDim：存量值可能不在档位表上（旧版本 / 被手改过），统一吸附
+            timetableBgDim = TimetableBgSpec.snapDim(
+                prefs.getInt(KEY_TIMETABLE_BG_DIM, TimetableBgSpec.DEFAULT_DIM),
+            ),
             // 走 decode：脏值一律读成「没有锚点」，不会拿一个错误的开学日期去算整学期周次
             termAnchor = TermAnchor.decode(prefs.getString(KEY_TERM_ANCHOR, null)),
         )
@@ -54,6 +61,9 @@ class SettingsStore(context: Context) {
             .putString(KEY_FONT_FAMILY, prefs_.fontFamily.key)
             .putInt(KEY_PERIOD_HEIGHT, prefs_.timetableSize.periodHeightDp)
             .putInt(KEY_COLUMN_WIDTH, prefs_.timetableSize.columnWidthDp)
+            // 传 null 会把键整个移除，正好对应「清除底图」；浓度单独存，清除时不跟着重置
+            .putString(KEY_TIMETABLE_BG, prefs_.timetableBgPath)
+            .putInt(KEY_TIMETABLE_BG_DIM, prefs_.timetableBgDim)
             // 传 null 会把键整个移除，正好对应「清除校准」
             .putString(KEY_TERM_ANCHOR, prefs_.termAnchor?.encode())
             .apply()
@@ -75,6 +85,8 @@ class SettingsStore(context: Context) {
         const val KEY_FONT_FAMILY = "font_family"
         const val KEY_PERIOD_HEIGHT = "timetable_period_height"
         const val KEY_COLUMN_WIDTH = "timetable_column_width"
+        const val KEY_TIMETABLE_BG = "timetable_bg_path"
+        const val KEY_TIMETABLE_BG_DIM = "timetable_bg_dim"
         const val KEY_TERM_ANCHOR = "term_anchor"
     }
 }

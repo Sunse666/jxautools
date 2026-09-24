@@ -45,6 +45,12 @@ FONT_SCALE_KEYS = {"small": 0.85, "normal": 1.00, "large": 1.15, "xlarge": 1.30}
 FONT_FAMILY_KEYS = ["default", "serif", "monospace"]
 SAT_LEVELS = {"soft": 0.55, "standard": 0.72, "vivid": 0.90}
 
+# 课表底图（TimetableBgSpec）
+DIM_STEP = 5
+MIN_DIM, MAX_DIM = 30, 90
+DIM_LEVELS = list(range(MIN_DIM, MAX_DIM + 1, DIM_STEP))
+DEFAULT_DIM = 60
+
 FAILS = []
 
 
@@ -87,6 +93,12 @@ def sat_level_of_key(key):
 def custom_hue_of(raw):
     """色相取模落到 0..359：负数与 >360 都绕回来，而不是被丢弃回默认"""
     return raw % 360
+
+
+def snap_dim(value):
+    """底图浓度吸附：先夹到 30..90，再向下对齐 5% 网格（与尺寸吸附同一套语义）。"""
+    clamped = min(max(value, MIN_DIM), MAX_DIM)
+    return MIN_DIM + (clamped - MIN_DIM) // DIM_STEP * DIM_STEP
 
 
 # ---- 2. 档位吸附 ----
@@ -244,6 +256,13 @@ def check_source_alignment():
     check("FontFamilyOption 的 key 列表", enum_keys(prefs, "FontFamilyOption"), FONT_FAMILY_KEYS)
     check("SatLevel 的 key/数值", enum_key_floats(prefs, "SatLevel"), SAT_LEVELS)
 
+    # 课表底图（TimetableBgSpec）
+    for name, ours in [
+        ("MIN_DIM", MIN_DIM), ("MAX_DIM", MAX_DIM),
+        ("DIM_STEP", DIM_STEP), ("DEFAULT_DIM", DEFAULT_DIM),
+    ]:
+        check(f"TimetableBgSpec.{name}", int_const(prefs, name), ours)
+
     # 存储键名：改 key 会**读丢用户设置**，而界面上一点异常都没有 —— 必须钉住。
     # 列表要写全：漏一个就等于那个键没人守（第一版只写了本轮新增的 6 个，
     # 这条检查立刻把 3 个既有键报了出来）。
@@ -257,6 +276,8 @@ def check_source_alignment():
         "KEY_FONT_FAMILY": "font_family",
         "KEY_PERIOD_HEIGHT": "timetable_period_height",
         "KEY_COLUMN_WIDTH": "timetable_column_width",
+        "KEY_TIMETABLE_BG": "timetable_bg_path",
+        "KEY_TIMETABLE_BG_DIM": "timetable_bg_dim",
         "KEY_TERM_ANCHOR": "term_anchor",
     })
 
@@ -440,6 +461,19 @@ def main():
     for h in HEIGHT_LEVELS:
         check(f"变异探针 h={h} 旧行高模型漏出",
               legacy_row_visible_bottom(h, 1) - block_visible_bottom(h, 1, 1), PERIOD_GAP)
+
+    print("\n== 课表底图浓度（对齐 5% 网格） ==")
+    # 期望值手算抄入，不回抄 snap_dim 自己的结果
+    for v, exp in [(30, 30), (60, 60), (90, 90), (29, 30), (91, 90), (0, 30),
+                   (5000, 90), (-5, 30), (47, 45), (62, 60), (63, 60)]:
+        check(f"snapDim({v})", snap_dim(v), exp)
+    check("浓度档位等步长", all(b - a == DIM_STEP for a, b in zip(DIM_LEVELS, DIM_LEVELS[1:])), True)
+    check("任意值吸附后都在档位表内",
+          all(snap_dim(v) in DIM_LEVELS for v in range(-50, 201, 7)), True)
+    # 蒙层方向：alpha = dim/100，随浓度单调不减 —— 写反的表现是「往浓拖，图反而更清楚」
+    alphas = [snap_dim(v) / 100 for v in DIM_LEVELS]
+    check("scrimAlpha 单调不减", all(b >= a for a, b in zip(alphas, alphas[1:])), True)
+    check("scrimAlpha(60)", snap_dim(DEFAULT_DIM) / 100, 0.60)
 
     if FAILS:
         print(f"\n{len(FAILS)} 项不一致：{FAILS}")
