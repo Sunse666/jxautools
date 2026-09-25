@@ -843,14 +843,6 @@ private fun TimetableBgSection(prefs: AppPreferences, viewModel: ProfileViewMode
                 onNudge = { delta -> viewModel.setTimetableBgDim(prefs.timetableBgDim + delta) },
             )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "仅课表页显示。图片会复制一份到应用私有目录，日常使用不需要存储权限；" +
-                "个别系统（如 MuMu 模拟器）选图后读不到图时会请求一次「照片/存储」权限作为兜底。" +
-                "清除后恢复纯色背景。课程块始终不透明，课名不会压在图片上。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
