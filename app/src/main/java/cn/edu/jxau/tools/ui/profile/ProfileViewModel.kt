@@ -126,12 +126,6 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     // ---------- 课表底图 ----------
 
     /**
-     * photo picker 的回调。拷贝 / 降采样 / 原子替换在 IO 线程做，失败给日志不给崩溃。
-     *
-     * 顺序是保命的：**写新文件 → 改偏好 → 删旧文件**。反过来任意一步崩溃都会丢图，
-     * 或留下「路径在、文件没了」的悬空状态（见 [TimetableBgStore] 文件头）。
-     */
-    /**
      * 底图保存失败的原因（null = 没有未处理的失败）。设置页展示用：
      * 保存失败只写日志的话，「选了没反应」就是用户看到的全部——把失败摆到界面上，
      * 静默失效才变成看得见的问题（消息里带 provider 诊断，截图即可排查）。
@@ -139,6 +133,12 @@ class ProfileViewModel(application: Application) : AndroidViewModel(application)
     private val _bgError = MutableStateFlow<String?>(null)
     val bgError: StateFlow<String?> = _bgError.asStateFlow()
 
+    /**
+     * photo picker 的回调。拷贝 / 降采样 / 原子替换在 IO 线程做，失败给日志不给崩溃。
+     *
+     * 顺序是保命的：**写新文件 → 改偏好 → 删旧文件**。反过来任意一步崩溃都会丢图，
+     * 或留下「路径在、文件没了」的悬空状态（见 [TimetableBgStore] 文件头）。
+     */
     fun onBgPicked(uri: Uri?) {
         if (uri == null) return
         viewModelScope.launch {
