@@ -174,6 +174,20 @@ internal fun <T> MotionSwap(
     target: T,
     label: String,
     modifier: Modifier = Modifier,
+    /**
+     * 层内要不要补不透明底（[MotionLayer] 的本职）。默认 `true`，全应用行为不变。
+     *
+     * **唯一的例外是课表页的底图**（2026-09-25）：页面根在 MotionSwap **之下**画了
+     * 底图 + 蒙层，想让半透明格子透出图来。这层不透明底的位置恰好在底图**之上**，
+     * 会把「周次条以下」整块盖成纯背景色——表现是「只有表头一条露出底图」，
+     * 不崩不报错（MuMu 像素对账确诊，见 `.workbuddy/memory/2026-09-25.md`）。
+     *
+     * 关掉它的代价：极端掉帧卡在过渡中间态时，内容混着的底下是「底图 + 蒙层」
+     * 而不是纯色。可接受——防串页的主力本来就是 [Motion.EnterFadeDelayMillis]
+     * 的先出后进错开（两层 alpha 窗口零重叠），不透明底只是兜底。
+     * 无底图时课表页照常传 true，行为与改动前完全一致。
+     */
+    opaqueBase: Boolean = true,
     content: @Composable (T) -> Unit,
 ) {
     AnimatedContent(
@@ -192,7 +206,7 @@ internal fun <T> MotionSwap(
             transform.using(noSizeTransform())
         },
         label = label,
-    ) { state -> MotionLayer { content(state) } }
+    ) { state -> MotionLayer(opaqueBase = opaqueBase) { content(state) } }
 }
 
 /**
@@ -262,6 +276,9 @@ private fun exitFadeSpec(): FiniteAnimationSpec<Float> =
 /**
  * 给过渡里的**每一层内容**补一块不透明底。当前色取 [MaterialTheme.colorScheme] 的 `background`。
  *
+ * [opaqueBase] = false 时这层底不画。唯一调用方：课表页的底图——层底位置在页面根
+ * 底图**之上**，不透明时会把底图盖死成「只有表头露图」（见 [MotionSwap] 参数说明）。
+ *
  * ## 为什么必须补在「每一层」上，而不是包在整个容器外
  * `AnimatedContent` 的过渡期里新旧两层**都在组合树里、都被绘制**。全应用唯一的不透明底在
  * `MainActivity` 的根 `Surface`，位于这两层**之下** —— 它遮不住旧层。旧层自己也是透明的
@@ -280,8 +297,17 @@ private fun exitFadeSpec(): FiniteAnimationSpec<Float> =
  * 半透明的底下是页面底色，而不是上一个页面。
  */
 @Composable
-private fun MotionLayer(content: @Composable () -> Unit) {
-    Box(modifier = Modifier.background(MaterialTheme.colorScheme.background)) { content() }
+private fun MotionLayer(
+    opaqueBase: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = if (opaqueBase) {
+            Modifier.background(MaterialTheme.colorScheme.background)
+        } else {
+            Modifier
+        },
+    ) { content() }
 }
 
 /**

@@ -124,6 +124,11 @@ fun TimetableScreen(viewModel: TimetableViewModel = viewModel()) {
                         TimetableUiState.Phase.Loading,
                     ),
                     label = "课表内容",
+                    // 有底图时必须关掉层内不透明底（默认 true）：那块底画在页面根的
+                    // 底图**之上**，会把周次条以下整块盖成纯背景色——表现是「只有表头
+                    // 一条露出底图」（2026-09-25 MuMu 像素对账确诊，见 MotionSwap 参数说明）。
+                    // 无底图时保持默认，行为与改动前完全一致。
+                    opaqueBase = bgBitmap == null,
                     modifier = Modifier.fillMaxSize(),
                 ) { phase ->
                     when (phase) {

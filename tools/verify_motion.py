@@ -423,6 +423,17 @@ def check_phase_merge():
     check("§7 三态页面的 `MotionSwap` 都经 `motionPhase(...)` 合并 Idle/Loading",
           sorted(bad), [])
 
+    # §7b 课表页底图护栏（2026-09-25）：有底图时必须关掉 MotionLayer 的层内不透明底，
+    # 否则那块底画在页面根底图之上，周次条以下整页被盖成纯背景色——
+    # 表现是「只有表头一条露出底图」，不崩不报错。这条钉住 opaqueBase 不被顺手删掉。
+    for p, src in SOURCES.items():
+        if "TimetableScreen" not in os.path.basename(p):
+            continue
+        for line, args in call_spans(strip_comments(src), "MotionSwap"):
+            ok = "opaqueBase" in args and "bgBitmap" in args
+            check("§7b 课表页 `MotionSwap` 传 `opaqueBase = bgBitmap == null`（有底图时层底必须透）",
+                  ok, True)
+
 
 # ---------------------------------------------------------------- §8 缓动
 def check_easing():
